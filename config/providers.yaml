@@ -1,0 +1,53 @@
+# Ethereum RPC Provider Configuration
+#
+# Provider Types:
+#   - public:      Free tier public endpoints (rate limited)
+#   - enterprise:  Paid enterprise endpoints with SLAs
+#   - self_hosted: Self-operated nodes (localhost or internal)
+#
+# In production, institutions would use enterprise or self_hosted providers.
+# Public endpoints are used here for portability and demonstration.
+
+defaults:
+  timeout: 10s
+  max_retries: 3
+  backoff_initial: 100ms
+  backoff_max: 5s
+
+providers:
+  # Alchemy - Popular managed node provider
+  # Get your API key at: https://www.alchemy.com/
+  - name: alchemy
+    url: https://eth-mainnet.g.alchemy.com/v2/0SaugUrj75N_bDS-KCTF2G8Yltuzr-f2
+    type: public
+    # For enterprise: url: https://eth-mainnet.g.alchemy.com/v2/Urj75N_bDS-KCTF2G8Yltuzr-f2
+
+  # Infura - ConsenSys managed node provider  
+  # Get your API key at: https://infura.io/
+  - name: infura
+    url: https://mainnet.infura.io/v3/b352245d9e3640288dd3bc8312cb4c69
+    type: public
+    # For enterprise: add dedicated endpoint URL
+
+  # LlamaNodes - Community-operated public RPC
+  # No API key required for public access
+  - name: llamanodes
+    url: https://eth.llamarpc.com
+    type: public
+
+  # PublicNode - Another community public RPC
+  - name: publicnode
+    url: https://ethereum-rpc.publicnode.com
+    type: public
+
+  # Example self-hosted configuration (commented out)
+  # - name: local-geth
+  #   url: http://localhost:8545
+  #   type: self_hosted
+  #   timeout: 5s  # Lower timeout for local nodes
+
+  # Example enterprise configuration (commented out)
+  # - name: alchemy-enterprise
+  #   url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
+  #   type: enterprise
+  #   timeout: 15s  # Higher timeout acceptable for SLA-backed endpoints

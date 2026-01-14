@@ -1,0 +1,68 @@
+# Ethereum RPC Monitor - Cursor Rules
+
+## Project Context
+Infrastructure reliability monitor for Ethereum RPC endpoints.
+Target audience: institutional crypto (Solutions Engineers, infra teams at Coinbase, Anchorage, Fireblocks, etc.).
+This is a portfolio project demonstrating operational thinking and Go proficiency.
+
+## What This Project Is
+- A CLI tool that monitors RPC endpoint health, latency, and data consistency
+- Demonstrates infrastructure resilience patterns used in production systems
+- Shows understanding of Ethereum node infrastructure from an institutional ops perspective
+
+## What This Project Is NOT
+- A trading bot or DeFi tool
+- A web application or dashboard
+- A production monitoring system (it demonstrates patterns, not scale)
+
+## Tech Constraints
+- Go 1.21+
+- Minimal dependencies: cobra, fatih/color, rodaine/table, yaml.v3
+- Raw net/http for RPC calls (need latency/error visibility, not abstraction)
+- NO ethclient or go-ethereum/rpc packages (defeats the purpose)
+
+## Architecture
+- cmd/monitor/main.go: Entry point, Cobra CLI setup
+- internal/rpc/: JSON-RPC client with retry, backoff, circuit breaker
+- internal/metrics/: Statistics collection and consistency checking
+- internal/output/: Terminal and JSON rendering
+- internal/config/: YAML configuration loading
+
+## Patterns to Follow
+- All RPC calls go through internal/rpc/client.go
+- Exponential backoff with jitter on retry (see calculateBackoff)
+- Circuit breaker: 3 consecutive failures opens, 30s cooldown
+- Logs to stderr when --format json is set
+- Context for cancellation throughout
+- Concurrent polling with goroutines + channels
+
+## Key RPC Methods
+- eth_blockNumber: liveness check, height tracking
+- eth_getBlockByNumber: data retrieval, hash for consistency checks
+
+## Do NOT
+- Add a web UI
+- Use ethclient or geth libraries for RPC
+- Add more than 4 providers
+- Add database/persistence
+- Scope creep into yield/DeFi analysis
+- Over-engineer the output formatting
+
+## Code Style
+- Clear error handling with wrapped errors
+- Table-driven tests where appropriate
+- Descriptive variable names (not single letters except in tight loops)
+- Comments explain "why", not "what"
+
+## When Implementing
+1. Start with the TODO items in cmd/monitor/main.go
+2. The RPC client is mostly complete - wire it up
+3. Focus on the snapshot command first, watch mode second
+4. Test against real endpoints (llamanodes and publicnode work without API keys)
+
+## Testing Commands
+```bash
+go build -o monitor ./cmd/monitor
+./monitor snapshot --samples 10 --config config/providers.yaml
+./monitor watch --refresh 5s
+```

@@ -1,0 +1,36 @@
+# Binaries
+monitor
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config with API keys (use providers.yaml.example as template)
+config/providers.local.yaml
+
+# Reports
+*.json
+!package.json
+
+# Logs
+*.log
