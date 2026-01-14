@@ -108,11 +108,7 @@ The RPC client implements production-grade resilience:
 
 ## RPC Methods and Institutional Impact
 
-### eth_blockNumber
-Returns the current block height. Primary use: liveness check and sync status.
 
-**Why institutions care:**  
-Stale block height means stale pricing data, delayed risk calculations, and potential settlement failures. If your provider reports height 19,234,560 while the network is at 19,234,580, your systems are operating on 4-minute-old state.
 
 **Failure modes:**
 - Timeout → Provider unreachable, trigger failover
