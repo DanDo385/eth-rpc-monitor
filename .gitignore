@@ -27,6 +27,7 @@ Thumbs.db
 
 # Local config with API keys (use providers.yaml.example as template)
 config/providers.local.yaml
+config/providers.yaml
 
 # Reports
 *.json

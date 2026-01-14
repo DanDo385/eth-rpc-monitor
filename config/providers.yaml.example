@@ -7,6 +7,11 @@
 #
 # In production, institutions would use enterprise or self_hosted providers.
 # Public endpoints are used here for portability and demonstration.
+#
+# To use this file:
+# 1. Copy this file to providers.yaml: cp config/providers.yaml.example config/providers.yaml
+# 2. Replace placeholder API keys with your actual keys
+# 3. providers.yaml is gitignored and will not be committed
 
 defaults:
   timeout: 10s
@@ -18,14 +23,14 @@ providers:
   # Alchemy - Popular managed node provider
   # Get your API key at: https://www.alchemy.com/
   - name: alchemy
-    url: https://eth-mainnet.g.alchemy.com/v2/0SaugUrj75N_bDS-KCTF2G8Yltuzr-f2
+    url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
     type: public
-    # For enterprise: url: https://eth-mainnet.g.alchemy.com/v2/Urj75N_bDS-KCTF2G8Yltuzr-f2
+    # For enterprise: url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
 
   # Infura - ConsenSys managed node provider  
   # Get your API key at: https://infura.io/
   - name: infura
-    url: https://mainnet.infura.io/v3/b352245d9e3640288dd3bc8312cb4c69
+    url: https://mainnet.infura.io/v3/YOUR_INFURA_API_KEY
     type: public
     # For enterprise: add dedicated endpoint URL
 
