@@ -140,8 +140,8 @@ func calculateProviderMetrics(name string, samples []rpc.CallResult) *ProviderMe
 func determineStatus(successRate float64, p95Latency time.Duration) ProviderStatus {
 	// Thresholds (these could be configurable)
 	const (
-		downThreshold     = 50.0          // <50% success = DOWN
-		degradedThreshold = 90.0          // <90% success = DEGRADED
+		downThreshold     = 50.0 // <50% success = DOWN
+		degradedThreshold = 90.0 // <90% success = DEGRADED
 		slowLatency       = 500 * time.Millisecond
 	)
 

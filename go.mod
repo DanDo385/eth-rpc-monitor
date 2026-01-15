@@ -3,8 +3,6 @@ module github.com/dmagro/eth-rpc-monitor
 go 1.24.0
 
 toolchain go1.24.11
-toolchain go1.24.3
-
 require (
 	github.com/fatih/color v1.16.0
 	github.com/rodaine/table v1.2.0
