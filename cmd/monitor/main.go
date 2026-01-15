@@ -57,7 +57,7 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd())
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -372,6 +372,111 @@ func runTxs(ctx context.Context, blockArg string, rawOutput bool, providerName s
 	}
 
 	output.RenderTxsTerminal(td, rawOutput)
+	return nil
+}
+
+func callCmd() *cobra.Command {
+	var (
+		rawOutput    bool
+		providerName string
+		format       string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "call",
+		Short: "Query smart contract state",
+		Long:  "Execute eth_call to read data from smart contracts.",
+	}
+
+	usdcCmd := &cobra.Command{
+		Use:   "usdc",
+		Short: "Query USDC contract",
+	}
+
+	balanceCmd := &cobra.Command{
+		Use:   "balance [address]",
+		Short: "Get USDC balance for an address",
+		Long: `Query the USDC balance of an Ethereum address.
+
+Examples:
+  monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+  monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --raw`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				cfgPath, _ = cmd.Root().PersistentFlags().GetString("config")
+			}
+			return runCallBalance(cmd.Context(), args[0], rpc.USDCAddress, "USDC", rpc.USDCDecimals, rawOutput, providerName, format, cfgPath)
+		},
+	}
+
+	balanceCmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw calldata and response")
+	balanceCmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider")
+	balanceCmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	usdcCmd.AddCommand(balanceCmd)
+	cmd.AddCommand(usdcCmd)
+
+	return cmd
+}
+
+func runCallBalance(ctx context.Context, address, contract, symbol string, decimals int, rawOutput bool, providerName string, format string, cfgPath string) error {
+	if err := rpc.ValidateAddress(address); err != nil {
+		return fmt.Errorf("invalid address: %w", err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	client, usedProvider, err := getProviderClient(cfg, providerName)
+	if err != nil {
+		return err
+	}
+
+	calldata, err := rpc.EncodeBalanceOfCalldata(address)
+	if err != nil {
+		return fmt.Errorf("failed to encode calldata: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, cfg.Defaults.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	rawResult, result := client.EthCall(reqCtx, contract, calldata, "latest")
+	latency := time.Since(start)
+
+	if !result.Success {
+		return fmt.Errorf("eth_call failed: %v", result.Error)
+	}
+
+	balance, err := rpc.DecodeUint256(rawResult)
+	if err != nil {
+		return fmt.Errorf("failed to decode balance: %w", err)
+	}
+
+	cd := &output.CallDisplay{
+		Contract:     contract,
+		ContractName: symbol,
+		Method:       "balanceOf",
+		Address:      address,
+		RawResult:    rawResult,
+		Calldata:     calldata,
+		ParsedValue:  balance,
+		Decimals:     decimals,
+		Symbol:       symbol,
+		Provider:     usedProvider,
+		Latency:      latency,
+	}
+
+	if format == "json" {
+		output.DisableColors()
+		return output.RenderCallJSON(cd, rawOutput)
+	}
+
+	output.RenderCallTerminal(cd, rawOutput)
 	return nil
 }
 

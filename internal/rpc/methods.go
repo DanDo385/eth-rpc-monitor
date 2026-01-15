@@ -35,6 +35,32 @@ func (c *Client) BlockNumber(ctx context.Context) (uint64, *CallResult) {
 	return blockNum, result
 }
 
+// EthCall performs an eth_call to query contract state
+func (c *Client) EthCall(ctx context.Context, to string, data string, blockTag string) (string, *CallResult) {
+	params := []interface{}{
+		map[string]string{
+			"to":   to,
+			"data": data,
+		},
+		blockTag,
+	}
+
+	result := c.Call(ctx, "eth_call", params...)
+	if !result.Success {
+		return "", result
+	}
+
+	var hexResult string
+	if err := json.Unmarshal(result.Response.Result, &hexResult); err != nil {
+		result.Success = false
+		result.Error = fmt.Errorf("failed to parse eth_call result: %w", err)
+		result.ErrorType = ErrorTypeParseError
+		return "", result
+	}
+
+	return hexResult, result
+}
+
 // Block represents a simplified Ethereum block
 type Block struct {
 	Number        uint64
