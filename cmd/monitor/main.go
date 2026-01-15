@@ -86,8 +86,8 @@ func runSnapshot(ctx context.Context) error {
 	var mu sync.Mutex
 
 	g, gctx := errgroup.WithContext(ctx)
-	for name, client := range clients {
-		name, client := name, client
+	for _, client := range clients {
+		client := client
 		g.Go(func() error {
 			for i := 0; i < snapshotSamples; i++ {
 				_, result := client.GetLatestBlock(gctx)
