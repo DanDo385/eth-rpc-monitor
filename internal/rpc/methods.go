@@ -114,3 +114,8 @@ func parseHexUint64(hex string) (uint64, error) {
 
 	return val.Uint64(), nil
 }
+
+// Uint64ToHex converts a uint64 to a hex string with 0x prefix for RPC calls
+func Uint64ToHex(n uint64) string {
+	return fmt.Sprintf("0x%x", n)
+}

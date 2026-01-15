@@ -1,68 +1,195 @@
-# Ethereum RPC Monitor - Cursor Rules
+# Ethereum RPC Monitor — Cursor Rules
 
 ## Project Context
-Infrastructure reliability monitor for Ethereum RPC endpoints.
-Target audience: institutional crypto (Solutions Engineers, infra teams at Coinbase, Anchorage, Fireblocks, etc.).
-This is a portfolio project demonstrating operational thinking and Go proficiency.
+Infrastructure reliability monitor for Ethereum RPC endpoints, expanding into a full Ethereum data exploration toolkit.  
+Target audience: institutional crypto (Solutions Engineers, infra teams at Coinbase, Anchorage, Fireblocks, etc.).  
+This is a portfolio project demonstrating operational thinking, Go proficiency, and understanding of Ethereum data structures.
 
 ## What This Project Is
 - A CLI tool that monitors RPC endpoint health, latency, and data consistency
+- A toolkit for exploring Ethereum blocks, transactions, and contract state
 - Demonstrates infrastructure resilience patterns used in production systems
 - Shows understanding of Ethereum node infrastructure from an institutional ops perspective
 
 ## What This Project Is NOT
 - A trading bot or DeFi tool
 - A web application or dashboard
-- A production monitoring system (it demonstrates patterns, not scale)
+- A production monitoring system (patterns > scale)
+- A wallet or transaction signing tool
 
 ## Tech Constraints
 - Go 1.21+
-- Minimal dependencies: cobra, fatih/color, rodaine/table, yaml.v3
-- Raw net/http for RPC calls (need latency/error visibility, not abstraction)
-- NO ethclient or go-ethereum/rpc packages (defeats the purpose)
+- Dependencies:
+  - cobra
+  - fatih/color
+  - rodaine/table
+  - yaml.v3
+  - golang.org/x/sync/errgroup
+  - golang.org/x/crypto/sha3
+- Raw `net/http` for RPC calls (need latency + error visibility)
+- **NO** `ethclient` or `go-ethereum/rpc` packages (defeats the purpose)
 
 ## Architecture
-- cmd/monitor/main.go: Entry point, Cobra CLI setup
-- internal/rpc/: JSON-RPC client with retry, backoff, circuit breaker
-- internal/metrics/: Statistics collection and consistency checking
-- internal/output/: Terminal and JSON rendering
-- internal/config/: YAML configuration loading
+```
+cmd/
+└── monitor/
+    └── main.go # Entry point, Cobra CLI setup
 
-## Patterns to Follow
-- All RPC calls go through internal/rpc/client.go
-- Exponential backoff with jitter on retry (see calculateBackoff)
-- Circuit breaker: 3 consecutive failures opens, 30s cooldown
-- Logs to stderr when --format json is set
-- Context for cancellation throughout
-- Concurrent polling with goroutines + channels
+internal/
+├── rpc/
+│   ├── client.go # JSON-RPC client with retry, backoff, circuit breaker
+│   ├── methods.go # Ethereum RPC method wrappers
+│   └── abi.go # ABI encoding for contract calls (Phase 4)
+├── metrics/
+│   ├── collector.go # Statistics collection
+│   └── consistency.go # Cross-provider consistency checking
+├── output/
+│   ├── terminal.go # Colored terminal rendering
+│   ├── json.go # JSON output formatting
+│   ├── blocks.go # Block + transaction rendering (Phase 2–3)
+│   └── watch.go # Watch mode display
+├── provider/
+│   └── selector.go # Provider ranking and selection (Phase 5)
+└── config/
+    └── config.go # YAML configuration loading
+```
 
-## Key RPC Methods
-- eth_blockNumber: liveness check, height tracking
-- eth_getBlockByNumber: data retrieval, hash for consistency checks
+## Commands
+| Command | Status | Description |
+|---------|--------|-------------|
+| `monitor snapshot` | DONE | Detailed diagnostic report |
+| `monitor watch` | DONE | Live monitoring |
+| `monitor blocks` | Phase 2 | Fetch block details |
+| `monitor txs` | Phase 3 | List transactions in a block |
+| `monitor call` | Phase 4 | Query contract state |
+| `monitor status` | Phase 5 | Provider health and ranking |
+
+## Development Principles
+
+### Iterate in Small Steps
+- Implement and verify one small feature at a time
+- Test terminal and JSON modes after every change
+- Commit working code before moving on
+
+### Concurrency with errgroup
+Always use `errgroup.Group` with context instead of raw `sync.WaitGroup`.
+
+```go
+import "golang.org/x/sync/errgroup"
+
+g, ctx := errgroup.WithContext(ctx)
+
+for _, p := range providers {
+    p := p // capture loop variable
+    g.Go(func() error {
+        return pollProvider(ctx, p)
+    })
+}
+
+if err := g.Wait(); err != nil {
+    return err
+}
+```
+
+### Error Handling
+- Always wrap errors: `fmt.Errorf("failed to fetch block: %w", err)`
+- Return errors up the stack; Cobra handles display
+- In JSON mode, errors go to stderr only
+
+### Output Mode Discipline
+- Terminal output is default
+- JSON output only with `--format json`
+- In JSON mode:
+  - NO colors
+  - NO tables
+  - NO status text on stdout
+  - All logs and warnings go to stderr
+- Validate with `| jq .` after every change
+
+### Consistency Checking (CRITICAL)
+- **NEVER** compare block hashes from different heights
+- Always use a two-phase approach:
+  1. Fetch heights from all providers
+  2. `referenceHeight = min(heights)`
+  3. Fetch hashes at exactly `referenceHeight`
+  4. Compare same-height hashes only
+- Prevents false positive mismatch alerts
+
+### Provider Selection Pattern
+- Default: auto-select best provider via health check
+- `--provider <name>` overrides auto-selection
+- Selection order:
+  1. Success rate
+  2. Latency
+  3. Block freshness
+- Always show which provider was selected and why
+
+### Data Formatting Standards
+- Block numbers: accept decimal or hex; use hex for RPC
+- Addresses: validate 40 hex chars (no 0x) or 42 with prefix
+- Hashes: display as `0x1234...abcd`
+- ETH values: convert from wei (÷ 10¹⁸), show 6 decimals
+- Token amounts: apply correct decimals (USDC=6, USDT=6)
+- Timestamps: show UTC time + relative "X ago"
+
+### Hardcoded Constants
+```go
+// Mainnet token addresses
+const (
+    USDCAddress = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    USDTAddress = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+)
+
+// ERC-20 function selectors
+const (
+    BalanceOfSelector = "0x70a08231" // keccak256("balanceOf(address)")[:4]
+)
+
+// Token decimals
+const (
+    USDCDecimals = 6
+    USDTDecimals = 6
+)
+```
 
 ## Do NOT
 - Add a web UI
-- Use ethclient or geth libraries for RPC
-- Add more than 4 providers
-- Add database/persistence
-- Scope creep into yield/DeFi analysis
-- Over-engineer the output formatting
+- Use ethclient or geth RPC helpers
+- Add persistence or databases
+- Add wallet or signing functionality
+- Mix stdout and stderr in JSON mode
+- Compare hashes from different block heights
+- Ignore errors silently
+- Print colors or formatting in JSON output
 
 ## Code Style
-- Clear error handling with wrapped errors
+- Wrapped, explicit error handling
 - Table-driven tests where appropriate
-- Descriptive variable names (not single letters except in tight loops)
-- Comments explain "why", not "what"
+- Descriptive variable names
+- Comments explain why, not what
+- Functions should be small (<50 lines when possible)
 
-## When Implementing
-1. Start with the TODO items in cmd/monitor/main.go
-2. The RPC client is mostly complete - wire it up
-3. Focus on the snapshot command first, watch mode second
-4. Test against real endpoints (llamanodes and publicnode work without API keys)
+## Testing Checklist
+After EVERY change:
+- `go build -o monitor ./cmd/monitor`
+- `go test ./...`
+- Terminal test: `./monitor <command>`
+- JSON test: `./monitor <command> --format json`
+- Validate JSON: `./monitor <command> --format json | jq .`
 
-## Testing Commands
+## Test Commands
 ```bash
+# Build
 go build -o monitor ./cmd/monitor
-./monitor snapshot --samples 10 --config config/providers.yaml
+
+# Existing
+./monitor snapshot --samples 10
 ./monitor watch --refresh 5s
+
+# New (as implemented)
+./monitor blocks latest
+./monitor blocks 19000000 --raw
+./monitor txs 19000000 --limit 10
+./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+./monitor status
 ```

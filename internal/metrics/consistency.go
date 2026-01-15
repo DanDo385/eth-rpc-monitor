@@ -7,10 +7,10 @@ import (
 // ConsistencyReport holds the results of cross-provider consistency checks
 type ConsistencyReport struct {
 	// Block height analysis
-	Heights         map[string]uint64 // provider -> block height
-	MaxHeight       uint64
-	HeightVariance  int    // max difference in blocks
-	HeightConsensus bool   // all providers within acceptable range
+	Heights               map[string]uint64 // provider -> block height
+	MaxHeight             uint64
+	HeightVariance        int    // max difference in blocks
+	HeightConsensus       bool   // all providers within acceptable range
 	AuthoritativeProvider string // provider reporting highest block
 
 	// Block hash analysis (at reference height)
@@ -50,43 +50,82 @@ type BlockHeightData struct {
 	Success  bool
 }
 
+// HeightData holds just height information (Phase 1 of consistency check)
+type HeightData struct {
+	Provider string
+	Height   uint64
+	Success  bool
+}
+
+// HashData holds hash at a specific height (Phase 2 of consistency check)
+type HashData struct {
+	Provider string
+	Height   uint64
+	Hash     string
+	Success  bool
+}
+
 // Check performs consistency analysis across all provider data
+// DEPRECATED: Use CheckTwoPhase instead to avoid comparing hashes from different heights
 func (c *ConsistencyChecker) Check(data []BlockHeightData) *ConsistencyReport {
+	// For backward compatibility, extract heights and hashes separately
+	heights := make([]HeightData, 0, len(data))
+	hashes := make([]HashData, 0, len(data))
+
+	for _, d := range data {
+		if d.Success {
+			heights = append(heights, HeightData{
+				Provider: d.Provider,
+				Height:   d.Height,
+				Success:  true,
+			})
+		}
+	}
+
+	// Use two-phase check
+	return c.CheckTwoPhase(heights, hashes)
+}
+
+// CheckTwoPhase performs consistency analysis using a two-phase approach:
+// Phase 1: Collect heights from all providers, find reference height (min height)
+// Phase 2: Compare hashes ONLY at the reference height
+// This prevents false positives from comparing hashes of different blocks.
+func (c *ConsistencyChecker) CheckTwoPhase(heights []HeightData, hashes []HashData) *ConsistencyReport {
 	report := &ConsistencyReport{
 		Heights:    make(map[string]uint64),
 		Hashes:     make(map[string]string),
 		Consistent: true,
 	}
 
-	// Collect heights and find max
+	// Phase 1: Collect heights and find max/min
 	var maxHeight uint64
 	var maxProvider string
+	var minHeight uint64
+	var hasValidHeight bool
 
-	for _, d := range data {
+	for _, d := range heights {
 		if !d.Success {
 			continue
 		}
 
 		report.Heights[d.Provider] = d.Height
-		report.Hashes[d.Provider] = d.Hash
 
 		if d.Height > maxHeight {
 			maxHeight = d.Height
 			maxProvider = d.Provider
 		}
+
+		if !hasValidHeight || d.Height < minHeight {
+			minHeight = d.Height
+			hasValidHeight = true
+		}
 	}
 
 	report.MaxHeight = maxHeight
 	report.AuthoritativeProvider = maxProvider
+	report.ReferenceHeight = minHeight
 
 	// Check height consensus
-	var minHeight uint64 = maxHeight
-	for _, height := range report.Heights {
-		if height < minHeight {
-			minHeight = height
-		}
-	}
-
 	report.HeightVariance = int(maxHeight - minHeight)
 	report.HeightConsensus = report.HeightVariance <= c.acceptableHeightDrift
 
@@ -96,24 +135,39 @@ func (c *ConsistencyChecker) Check(data []BlockHeightData) *ConsistencyReport {
 			fmt.Sprintf("Block height variance of %d blocks exceeds threshold", report.HeightVariance))
 	}
 
-	// Check hash consensus at the minimum common height
-	// (We can only compare hashes at heights all providers have seen)
-	report.ReferenceHeight = minHeight
+	// Phase 2: Check hash consensus ONLY at reference height
+	// CRITICAL: Only compare hashes from the same block height
+	for _, d := range hashes {
+		if !d.Success {
+			continue
+		}
+
+		// Only include hashes at exactly the reference height
+		if d.Height == report.ReferenceHeight {
+			report.Hashes[d.Provider] = d.Hash
+		}
+	}
+
 	c.checkHashConsensus(report)
 
 	return report
 }
 
 // checkHashConsensus analyzes hash agreement across providers
+// NOTE: This function assumes all hashes in report.Hashes are from the same height (report.ReferenceHeight)
 func (c *ConsistencyChecker) checkHashConsensus(report *ConsistencyReport) {
+	if len(report.Hashes) == 0 {
+		// No hash data available
+		report.HashConsensus = false
+		return
+	}
+
 	// Group providers by hash
 	hashToProviders := make(map[string][]string)
 
 	for provider, hash := range report.Hashes {
-		// Only include providers at or above reference height
-		if report.Heights[provider] >= report.ReferenceHeight {
-			hashToProviders[hash] = append(hashToProviders[hash], provider)
-		}
+		// All hashes should be at referenceHeight (enforced in CheckTwoPhase)
+		hashToProviders[hash] = append(hashToProviders[hash], provider)
 	}
 
 	// Build hash groups
@@ -124,7 +178,7 @@ func (c *ConsistencyChecker) checkHashConsensus(report *ConsistencyReport) {
 		})
 	}
 
-	// Check consensus
+	// Check consensus - all providers should agree on the same hash
 	report.HashConsensus = len(report.HashGroups) <= 1
 
 	if !report.HashConsensus {
