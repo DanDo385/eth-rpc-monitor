@@ -19,6 +19,7 @@ import (
 	"github.com/dmagro/eth-rpc-monitor/internal/config"
 	"github.com/dmagro/eth-rpc-monitor/internal/metrics"
 	"github.com/dmagro/eth-rpc-monitor/internal/output"
+	"github.com/dmagro/eth-rpc-monitor/internal/provider"
 	"github.com/dmagro/eth-rpc-monitor/internal/rpc"
 )
 
@@ -57,7 +58,7 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd())
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd(), statusCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -277,6 +278,7 @@ func runBlocks(ctx context.Context, blockArg string, rawOutput bool, providerNam
 		Provider:    usedProvider,
 		Latency:     latency,
 		RawResponse: rawResponse,
+		IsAutoSelected: providerName == "",
 	}
 
 	if format == "json" {
@@ -364,6 +366,7 @@ func runTxs(ctx context.Context, blockArg string, rawOutput bool, providerName s
 		Provider:     usedProvider,
 		Latency:      latency,
 		RawResponse:  rawResponse,
+		IsAutoSelected: providerName == "",
 	}
 
 	if format == "json" {
@@ -401,10 +404,57 @@ func parseBlockArg(arg string) (string, error) {
 	return fmt.Sprintf("0x%x", num), nil
 }
 
-// getProviderClient returns a client for the specified provider or first available
+// getProviderClient returns a client for the specified provider or auto-selects best
 func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, string, error) {
+	// If provider specified, use that one
+	if providerName != "" {
+		for _, p := range cfg.Providers {
+			if p.Name == providerName {
+				client := rpc.NewClient(rpc.ClientConfig{
+					Name:           p.Name,
+					URL:            p.URL,
+					Timeout:        p.Timeout,
+					MaxRetries:     cfg.Defaults.MaxRetries,
+					BackoffInitial: cfg.Defaults.BackoffInitial,
+					BackoffMax:     cfg.Defaults.BackoffMax,
+				})
+				return client, p.Name, nil
+			}
+		}
+		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
+	}
+
+	// Auto-select: run quick health check
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(ctx, cfg, 3) // Fast check with 3 samples
+	if err != nil {
+		// Fallback to first provider
+		if len(cfg.Providers) > 0 {
+			p := cfg.Providers[0]
+			client := rpc.NewClient(rpc.ClientConfig{
+				Name:           p.Name,
+				URL:            p.URL,
+				Timeout:        p.Timeout,
+				MaxRetries:     cfg.Defaults.MaxRetries,
+				BackoffInitial: cfg.Defaults.BackoffInitial,
+				BackoffMax:     cfg.Defaults.BackoffMax,
+			})
+			fmt.Fprintf(os.Stderr, "Warning: health check failed, using first provider: %s\n", p.Name)
+			return client, p.Name, nil
+		}
+		return nil, "", fmt.Errorf("no providers available")
+	}
+
+	best, err := ranked.Best()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	// Find the provider config
 	for _, p := range cfg.Providers {
-		if providerName == "" || p.Name == providerName {
+		if p.Name == best.Name {
 			client := rpc.NewClient(rpc.ClientConfig{
 				Name:           p.Name,
 				URL:            p.URL,
@@ -417,10 +467,7 @@ func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, st
 		}
 	}
 
-	if providerName != "" {
-		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
-	}
-	return nil, "", fmt.Errorf("no providers configured")
+	return nil, "", fmt.Errorf("selected provider not found in config")
 }
 
 func loadConfig(path string) (*config.Config, error) {
@@ -606,3 +653,173 @@ func statusSeverity(status metrics.ProviderStatus) output.EventSeverity {
 		return output.SeverityInfo
 	}
 }
+
+func callCmd() *cobra.Command {
+	var (
+		rawOutput    bool
+		providerName string
+		format       string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "call",
+		Short: "Query smart contract state",
+		Long:  "Execute eth_call to read data from smart contracts.",
+	}
+
+	// Subcommand: call usdc
+	usdcCmd := &cobra.Command{
+		Use:   "usdc",
+		Short: "Query USDC contract",
+	}
+
+	// Subcommand: call usdc balance
+	balanceCmd := &cobra.Command{
+		Use:   "balance ",
+		Short: "Get USDC balance for an address",
+		Long: `Query the USDC balance of an Ethereum address.
+
+Examples:
+  monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+  monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --raw`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				cfgPath, _ = cmd.Root().PersistentFlags().GetString("config")
+			}
+			return runCallBalance(args[0], rpc.USDCAddress, "USDC", rpc.USDCDecimals, rawOutput, providerName, format, cfgPath)
+		},
+	}
+
+	balanceCmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw calldata and response")
+	balanceCmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider")
+	balanceCmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	usdcCmd.AddCommand(balanceCmd)
+	cmd.AddCommand(usdcCmd)
+
+	return cmd
+}
+
+func runCallBalance(address, contract, symbol string, decimals int, rawOutput bool, providerName string, format string, cfgPath string) error {
+	// Validate address
+	if err := rpc.ValidateAddress(address); err != nil {
+		return fmt.Errorf("invalid address: %w", err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	client, usedProvider, err := getProviderClient(cfg, providerName)
+	if err != nil {
+		return err
+	}
+
+	// Encode calldata
+	calldata, err := rpc.EncodeBalanceOfCalldata(address)
+	if err != nil {
+		return fmt.Errorf("failed to encode calldata: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Defaults.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	rawResult, result := client.EthCall(ctx, contract, calldata, "latest")
+	latency := time.Since(start)
+
+	if !result.Success {
+		return fmt.Errorf("eth_call failed: %v", result.Error)
+	}
+
+	// Decode result
+	balance, err := rpc.DecodeUint256(rawResult)
+	if err != nil {
+		return fmt.Errorf("failed to decode balance: %w", err)
+	}
+
+	cd := &output.CallDisplay{
+		Contract:     contract,
+		ContractName: symbol,
+		Method:       "balanceOf",
+		Address:      address,
+		RawResult:    rawResult,
+		Calldata:     calldata,
+		ParsedValue:  balance,
+		Decimals:     decimals,
+		Symbol:       symbol,
+		Provider:     usedProvider,
+		Latency:      latency,
+		IsAutoSelected: providerName == "",
+	}
+
+	if format == "json" {
+		output.DisableColors()
+		return output.RenderCallJSON(cd, rawOutput)
+	}
+
+	output.RenderCallTerminal(cd, rawOutput)
+	return nil
+}
+
+func statusCmd() *cobra.Command {
+	var (
+		samples int
+		format  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Quick health check and provider ranking",
+		Long: `Perform a quick health check on all configured providers and rank them.
+
+This is useful for:
+- Seeing which providers are healthy
+- Understanding which provider to use as primary
+- Diagnosing provider issues
+
+Example:
+  monitor status`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				cfgPath, _ = cmd.Root().PersistentFlags().GetString("config")
+			}
+			return runStatus(samples, format, cfgPath)
+		},
+	}
+
+	cmd.Flags().IntVar(&samples, "samples", 5, "Number of samples per provider")
+	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	return cmd
+}
+
+func runStatus(samples int, format string, cfgPath string) error {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(ctx, cfg, samples)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+
+	if format == "json" {
+		output.DisableColors()
+		return output.RenderStatusJSON(ranked)
+	}
+
+	output.RenderStatusTerminal(ranked)
+	return nil
+}
+
+
+
