@@ -19,6 +19,7 @@ import (
 	"github.com/dmagro/eth-rpc-monitor/internal/config"
 	"github.com/dmagro/eth-rpc-monitor/internal/metrics"
 	"github.com/dmagro/eth-rpc-monitor/internal/output"
+	"github.com/dmagro/eth-rpc-monitor/internal/provider"
 	"github.com/dmagro/eth-rpc-monitor/internal/rpc"
 )
 
@@ -57,7 +58,7 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd())
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd(), statusCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -399,6 +400,64 @@ func runCallBalance(ctx context.Context, address, contract, symbol string, decim
 	return nil
 }
 
+func statusCmd() *cobra.Command {
+	var (
+		samples int
+		format  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Quick health check and provider ranking",
+		Long: `Perform a quick health check on all configured providers and rank them.
+
+This is useful for:
+- Seeing which providers are healthy
+- Understanding which provider to use as primary
+- Diagnosing provider issues
+
+Example:
+  monitor status
+  monitor status --samples 10
+  monitor status --format json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				cfgPath, _ = cmd.Root().PersistentFlags().GetString("config")
+			}
+			return runStatus(cmd.Context(), samples, format, cfgPath)
+		},
+	}
+
+	cmd.Flags().IntVar(&samples, "samples", 5, "Number of samples per provider")
+	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	return cmd
+}
+
+func runStatus(ctx context.Context, samples int, format string, cfgPath string) error {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	statusCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(statusCtx, cfg, samples)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+
+	if format == "json" {
+		output.DisableColors()
+		return output.RenderStatusJSON(ranked)
+	}
+
+	output.RenderStatusTerminal(ranked)
+	return nil
+}
+
 func txsCmd() *cobra.Command {
 	var (
 		rawOutput    bool
@@ -512,10 +571,57 @@ func parseBlockArg(arg string) (string, error) {
 	return fmt.Sprintf("0x%x", num), nil
 }
 
-// getProviderClient returns a client for the specified provider or first available
+// getProviderClient returns a client for the specified provider or auto-selects best
 func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, string, error) {
+	// If provider specified, use that one
+	if providerName != "" {
+		for _, p := range cfg.Providers {
+			if p.Name == providerName {
+				client := rpc.NewClient(rpc.ClientConfig{
+					Name:           p.Name,
+					URL:            p.URL,
+					Timeout:        p.Timeout,
+					MaxRetries:     cfg.Defaults.MaxRetries,
+					BackoffInitial: cfg.Defaults.BackoffInitial,
+					BackoffMax:     cfg.Defaults.BackoffMax,
+				})
+				return client, p.Name, nil
+			}
+		}
+		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
+	}
+
+	// Auto-select: run quick health check
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(ctx, cfg, 3) // Fast check with 3 samples
+	if err != nil {
+		// Fallback to first provider
+		if len(cfg.Providers) > 0 {
+			p := cfg.Providers[0]
+			client := rpc.NewClient(rpc.ClientConfig{
+				Name:           p.Name,
+				URL:            p.URL,
+				Timeout:        p.Timeout,
+				MaxRetries:     cfg.Defaults.MaxRetries,
+				BackoffInitial: cfg.Defaults.BackoffInitial,
+				BackoffMax:     cfg.Defaults.BackoffMax,
+			})
+			fmt.Fprintf(os.Stderr, "Warning: health check failed, using first provider: %s\n", p.Name)
+			return client, p.Name, nil
+		}
+		return nil, "", fmt.Errorf("no providers available")
+	}
+
+	best, err := ranked.Best()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	// Find the provider config
 	for _, p := range cfg.Providers {
-		if providerName == "" || p.Name == providerName {
+		if p.Name == best.Name {
 			client := rpc.NewClient(rpc.ClientConfig{
 				Name:           p.Name,
 				URL:            p.URL,
@@ -528,10 +634,7 @@ func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, st
 		}
 	}
 
-	if providerName != "" {
-		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
-	}
-	return nil, "", fmt.Errorf("no providers configured")
+	return nil, "", fmt.Errorf("selected provider not found in config")
 }
 
 func loadConfig(path string) (*config.Config, error) {
