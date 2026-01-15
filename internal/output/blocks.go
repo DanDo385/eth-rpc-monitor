@@ -87,6 +87,127 @@ func RenderBlockJSON(bd *BlockDisplay, includeRaw bool) error {
 	return encoder.Encode(output)
 }
 
+// TxDisplay holds transaction list for rendering
+type TxDisplay struct {
+	BlockNumber  uint64
+	Transactions []rpc.Transaction
+	TotalCount   int
+	Limit        int
+	Provider     string
+	Latency      time.Duration
+	RawResponse  json.RawMessage
+}
+
+// RenderTxsTerminal outputs transaction list to terminal
+func RenderTxsTerminal(td *TxDisplay, showRaw bool) {
+	if showRaw && td.RawResponse != nil {
+		var block map[string]json.RawMessage
+		if err := json.Unmarshal(td.RawResponse, &block); err == nil {
+			if txs, ok := block["transactions"]; ok {
+				var prettyJSON bytes.Buffer
+				if err := json.Indent(&prettyJSON, txs, "", "  "); err == nil {
+					fmt.Println(prettyJSON.String())
+					return
+				}
+			}
+		}
+		var prettyJSON bytes.Buffer
+		if err := json.Indent(&prettyJSON, td.RawResponse, "", "  "); err == nil {
+			fmt.Println(prettyJSON.String())
+		} else {
+			fmt.Println(string(td.RawResponse))
+		}
+		return
+	}
+
+	shown := len(td.Transactions)
+	if td.Limit > 0 && shown > td.Limit {
+		shown = td.Limit
+	}
+
+	fmt.Println()
+	fmt.Printf("%s\n", blockBold(fmt.Sprintf("Transactions in Block #%d", td.BlockNumber)))
+	fmt.Printf("Showing %d of %d transactions\n", shown, td.TotalCount)
+	fmt.Println("════════════════════════════════════════════════════════════════════════════")
+	fmt.Printf("  %-5s  %-15s  %-15s  %-15s  %s\n",
+		"#", "Hash", "From", "To", "Value (ETH)")
+	fmt.Println("────────────────────────────────────────────────────────────────────────────")
+
+	displayTxs := td.Transactions
+	if td.Limit > 0 && len(displayTxs) > td.Limit {
+		displayTxs = displayTxs[:td.Limit]
+	}
+
+	for i, tx := range displayTxs {
+		toDisplay := truncateAddress(tx.To)
+		if tx.To == "" {
+			toDisplay = color.New(color.FgYellow).Sprint("[Create]")
+		}
+
+		fmt.Printf("  %-5d  %s  %s  %s  %s\n",
+			i,
+			truncateHash(tx.Hash),
+			truncateAddress(tx.From),
+			toDisplay,
+			formatEthValue(tx.Value))
+	}
+
+	fmt.Println("════════════════════════════════════════════════════════════════════════════")
+
+	if td.Limit > 0 && td.TotalCount > td.Limit {
+		fmt.Printf("  Use --limit %d to see more transactions\n", td.TotalCount)
+	}
+
+	fmt.Printf("  Fetched via: %s (%dms)\n", td.Provider, td.Latency.Milliseconds())
+	fmt.Println()
+}
+
+// RenderTxsJSON outputs transactions as JSON
+func RenderTxsJSON(td *TxDisplay, includeRaw bool) error {
+	displayTxs := td.Transactions
+	if td.Limit > 0 && len(displayTxs) > td.Limit {
+		displayTxs = displayTxs[:td.Limit]
+	}
+
+	txList := make([]map[string]interface{}, 0, len(displayTxs))
+	for _, tx := range displayTxs {
+		valueStr := "0"
+		if tx.Value != nil {
+			valueStr = tx.Value.String()
+		}
+		txMap := map[string]interface{}{
+			"hash":     tx.Hash,
+			"from":     tx.From,
+			"to":       tx.To,
+			"value":    valueStr,
+			"valueEth": formatEthValueRaw(tx.Value),
+			"gas":      tx.Gas,
+			"nonce":    tx.Nonce,
+			"txIndex":  tx.TxIndex,
+		}
+		txList = append(txList, txMap)
+	}
+
+	output := map[string]interface{}{
+		"blockNumber":  td.BlockNumber,
+		"totalCount":   td.TotalCount,
+		"shownCount":   len(displayTxs),
+		"transactions": txList,
+		"meta": map[string]interface{}{
+			"provider":  td.Provider,
+			"latencyMs": td.Latency.Milliseconds(),
+		},
+	}
+
+	if includeRaw && td.RawResponse != nil {
+		output["rawResponse"] = json.RawMessage(td.RawResponse)
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(output)
+}
+
 func formatBlockTime(ts uint64) string {
 	t := time.Unix(int64(ts), 0)
 	ago := time.Since(t)
@@ -147,4 +268,35 @@ func formatBaseFeeRaw(fee *big.Int) string {
 		return ""
 	}
 	return fee.String()
+}
+
+func truncateAddress(addr string) string {
+	if addr == "" {
+		return ""
+	}
+	if len(addr) <= 15 {
+		return addr
+	}
+	return addr[:6] + "..." + addr[len(addr)-4:]
+}
+
+func formatEthValue(wei *big.Int) string {
+	if wei == nil || wei.Sign() == 0 {
+		return "0.000000"
+	}
+	ethFloat := new(big.Float).SetInt(wei)
+	divisor := new(big.Float).SetFloat64(1e18)
+	ethFloat.Quo(ethFloat, divisor)
+	f, _ := ethFloat.Float64()
+	return fmt.Sprintf("%.6f", f)
+}
+
+func formatEthValueRaw(wei *big.Int) string {
+	if wei == nil {
+		return "0"
+	}
+	ethFloat := new(big.Float).SetInt(wei)
+	divisor := new(big.Float).SetFloat64(1e18)
+	ethFloat.Quo(ethFloat, divisor)
+	return ethFloat.Text('f', 18)
 }

@@ -47,6 +47,26 @@ type Block struct {
 	TxCount       int
 }
 
+// Transaction represents a parsed Ethereum transaction
+type Transaction struct {
+	Hash        string
+	From        string
+	To          string // Empty for contract creation
+	Value       *big.Int
+	Gas         uint64
+	GasPrice    *big.Int
+	Nonce       uint64
+	BlockNumber uint64
+	TxIndex     uint64
+	Input       string // Calldata (truncated for display)
+}
+
+// BlockWithTransactions holds a block with full transaction objects
+type BlockWithTransactions struct {
+	Block
+	Transactions []Transaction
+}
+
 // GetBlockByNumber calls eth_getBlockByNumber and returns block data
 // If fullTx is false, only transaction hashes are returned (lighter call)
 func (c *Client) GetBlockByNumber(ctx context.Context, blockNum string, fullTx bool) (*Block, *CallResult) {
@@ -105,6 +125,95 @@ func (c *Client) GetBlockByNumberWithRaw(ctx context.Context, blockNum string, f
 	}
 
 	return block, rawResponse, result
+}
+
+// GetBlockWithTransactions fetches a block with full transaction details
+func (c *Client) GetBlockWithTransactions(ctx context.Context, blockNum string) (*BlockWithTransactions, json.RawMessage, *CallResult) {
+	result := c.Call(ctx, "eth_getBlockByNumber", blockNum, true)
+	if !result.Success {
+		return nil, nil, result
+	}
+
+	rawResponse := result.Response.Result
+
+	var blockData struct {
+		Number        string `json:"number"`
+		Hash          string `json:"hash"`
+		ParentHash    string `json:"parentHash"`
+		Timestamp     string `json:"timestamp"`
+		GasUsed       string `json:"gasUsed"`
+		GasLimit      string `json:"gasLimit"`
+		BaseFeePerGas string `json:"baseFeePerGas,omitempty"`
+		Transactions  []struct {
+			Hash             string `json:"hash"`
+			From             string `json:"from"`
+			To               string `json:"to"`
+			Value            string `json:"value"`
+			Gas              string `json:"gas"`
+			GasPrice         string `json:"gasPrice"`
+			Nonce            string `json:"nonce"`
+			BlockNumber      string `json:"blockNumber"`
+			TransactionIndex string `json:"transactionIndex"`
+			Input            string `json:"input"`
+		} `json:"transactions"`
+	}
+
+	if err := json.Unmarshal(result.Response.Result, &blockData); err != nil {
+		result.Success = false
+		result.Error = fmt.Errorf("failed to parse block: %w", err)
+		result.ErrorType = ErrorTypeParseError
+		return nil, nil, result
+	}
+
+	blockNum64, _ := parseHexUint64(blockData.Number)
+	timestamp, _ := parseHexUint64(blockData.Timestamp)
+	gasUsed, _ := parseHexUint64(blockData.GasUsed)
+	gasLimit, _ := parseHexUint64(blockData.GasLimit)
+
+	var baseFee *big.Int
+	if blockData.BaseFeePerGas != "" {
+		baseFee, _ = parseHexBigInt(blockData.BaseFeePerGas)
+	}
+
+	txs := make([]Transaction, 0, len(blockData.Transactions))
+	for _, txData := range blockData.Transactions {
+		gas, _ := parseHexUint64(txData.Gas)
+		nonce, _ := parseHexUint64(txData.Nonce)
+		txBlockNum, _ := parseHexUint64(txData.BlockNumber)
+		txIndex, _ := parseHexUint64(txData.TransactionIndex)
+		value, _ := parseHexBigInt(txData.Value)
+		gasPrice, _ := parseHexBigInt(txData.GasPrice)
+
+		tx := Transaction{
+			Hash:        txData.Hash,
+			From:        txData.From,
+			To:          txData.To,
+			Value:       value,
+			Gas:         gas,
+			GasPrice:    gasPrice,
+			Nonce:       nonce,
+			BlockNumber: txBlockNum,
+			TxIndex:     txIndex,
+			Input:       txData.Input,
+		}
+		txs = append(txs, tx)
+	}
+
+	blockWithTxs := &BlockWithTransactions{
+		Block: Block{
+			Number:        blockNum64,
+			Hash:          blockData.Hash,
+			ParentHash:    blockData.ParentHash,
+			Timestamp:     timestamp,
+			GasUsed:       gasUsed,
+			GasLimit:      gasLimit,
+			BaseFeePerGas: baseFee,
+			TxCount:       len(txs),
+		},
+		Transactions: txs,
+	}
+
+	return blockWithTxs, rawResponse, result
 }
 
 // GetLatestBlock is a convenience method to get the latest block
