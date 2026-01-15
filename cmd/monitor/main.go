@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -56,7 +57,9 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd)
+	blocksCmd := newBlocksCmd(&cfgPath)
+
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -196,6 +199,135 @@ func runWatch(ctx context.Context, cfgPath string, refresh time.Duration) error 
 			}
 		}
 	}
+}
+
+func newBlocksCmd(cfgPath *string) *cobra.Command {
+	var (
+		rawOutput    bool
+		providerName string
+		format       string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "blocks [latest|number]",
+		Short: "Fetch and display block details",
+		Long: `Fetch block data from an Ethereum RPC provider.
+
+Examples:
+  monitor blocks latest
+  monitor blocks 19000000
+  monitor blocks 0x121eac0
+  monitor blocks latest --raw
+  monitor blocks latest --provider alchemy`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBlocks(cmd.Context(), *cfgPath, args[0], format, rawOutput, providerName)
+		},
+	}
+
+	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw JSON-RPC response")
+	cmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider (default: first available)")
+	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	return cmd
+}
+
+func runBlocks(ctx context.Context, cfgPath, blockArg, format string, rawOutput bool, providerName string) error {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	blockNum, err := parseBlockArg(blockArg)
+	if err != nil {
+		return err
+	}
+
+	client, usedProvider, err := getProviderClient(cfg, providerName)
+	if err != nil {
+		return err
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, cfg.Defaults.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	block, rawResponse, result := client.GetBlockByNumberWithRaw(reqCtx, blockNum, false)
+	latency := time.Since(start)
+
+	if !result.Success {
+		if result.Error != nil {
+			return fmt.Errorf("failed to fetch block: %w", result.Error)
+		}
+		return fmt.Errorf("failed to fetch block")
+	}
+
+	if block == nil {
+		return fmt.Errorf("block %s not found", blockArg)
+	}
+
+	bd := &output.BlockDisplay{
+		Block:       block,
+		Provider:    usedProvider,
+		Latency:     latency,
+		RawResponse: rawResponse,
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		output.DisableColors()
+		return output.RenderBlockJSON(bd, rawOutput)
+	case "terminal", "":
+		output.RenderBlockTerminal(bd, rawOutput)
+		return nil
+	default:
+		return fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+func parseBlockArg(arg string) (string, error) {
+	arg = strings.TrimSpace(arg)
+
+	if arg == "latest" || arg == "pending" || arg == "earliest" {
+		return arg, nil
+	}
+
+	if strings.HasPrefix(arg, "0x") {
+		if len(arg) <= 2 {
+			return "", fmt.Errorf("invalid hex block number: %s", arg)
+		}
+		if _, err := strconv.ParseUint(arg[2:], 16, 64); err != nil {
+			return "", fmt.Errorf("invalid hex block number: %s", arg)
+		}
+		return arg, nil
+	}
+
+	num, err := strconv.ParseUint(arg, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid block number: %s (use decimal, hex with 0x prefix, or 'latest')", arg)
+	}
+	return fmt.Sprintf("0x%x", num), nil
+}
+
+func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, string, error) {
+	for _, provider := range cfg.Providers {
+		if providerName == "" || provider.Name == providerName {
+			client := rpc.NewClient(rpc.ClientConfig{
+				Name:           provider.Name,
+				URL:            provider.URL,
+				Timeout:        provider.Timeout,
+				MaxRetries:     cfg.Defaults.MaxRetries,
+				BackoffInitial: cfg.Defaults.BackoffInitial,
+				BackoffMax:     cfg.Defaults.BackoffMax,
+			})
+			return client, provider.Name, nil
+		}
+	}
+
+	if providerName != "" {
+		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
+	}
+	return nil, "", fmt.Errorf("no providers configured")
 }
 
 func loadConfig(path string) (*config.Config, error) {
