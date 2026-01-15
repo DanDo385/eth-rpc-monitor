@@ -23,6 +23,7 @@ type BlockDisplay struct {
 	Provider    string
 	Latency     time.Duration
 	RawResponse json.RawMessage
+	IsAutoSelected bool
 }
 
 // RenderBlockTerminal outputs block details to terminal
@@ -40,6 +41,11 @@ func RenderBlockTerminal(bd *BlockDisplay, showRaw bool) {
 	block := bd.Block
 
 	fmt.Println()
+	if bd.IsAutoSelected {
+		fmt.Printf("  %s\n", color.New(color.FgCyan, color.Italic).Sprintf("[Auto-selected best provider: %s]", bd.Provider))
+		fmt.Println()
+	}
+
 	fmt.Printf("%s\n", blockBold(fmt.Sprintf("Block #%d", block.Number)))
 	fmt.Println("═══════════════════════════════════════════════════════")
 	fmt.Printf("  %s           %s\n", blockCyan("Hash:"), block.Hash)
@@ -158,6 +164,7 @@ type TxDisplay struct {
 	Provider     string
 	Latency      time.Duration
 	RawResponse  json.RawMessage
+	IsAutoSelected bool
 }
 
 // RenderTxsTerminal outputs transaction list to terminal
@@ -186,6 +193,11 @@ func RenderTxsTerminal(td *TxDisplay, showRaw bool) {
 	}
 
 	fmt.Println()
+	if td.IsAutoSelected {
+		fmt.Printf("  %s\n", color.New(color.FgCyan, color.Italic).Sprintf("[Auto-selected best provider: %s]", td.Provider))
+		fmt.Println()
+	}
+
 	fmt.Printf("%s\n", blockBold(fmt.Sprintf("Transactions in Block #%d", td.BlockNumber)))
 	fmt.Printf("Showing %d of %d transactions\n", shown, td.TotalCount)
 	fmt.Println("════════════════════════════════════════════════════════════════════════════")
