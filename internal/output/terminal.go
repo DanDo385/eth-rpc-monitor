@@ -139,14 +139,20 @@ func renderConsistencyCheck(c *metrics.ConsistencyReport) {
 	// Hash consistency
 	if len(c.HashGroups) > 0 {
 		fmt.Println(bold("Block Hash Consistency"))
+		fmt.Printf("  Reference Height: %s\n", cyan(fmt.Sprintf("%d", c.ReferenceHeight)))
 		if c.HashConsensus {
-			fmt.Printf("  %s All providers report consistent block hash\n", green("✓"))
+			fmt.Printf("  %s All providers report consistent block hash at reference height\n", green("✓"))
 		} else {
-			fmt.Printf("  %s HASH MISMATCH DETECTED\n", red("✗"))
-			for _, group := range c.HashGroups {
-				fmt.Printf("    %s: %s\n",
+			fmt.Printf("  %s HASH MISMATCH DETECTED at height %d\n", red("✗"), c.ReferenceHeight)
+			for i, group := range c.HashGroups {
+				suffix := ""
+				if i > 0 {
+					suffix = " ← minority"
+				}
+				fmt.Printf("    %s: %s%s\n",
+					truncateHash(group.Hash),
 					strings.Join(group.Providers, ", "),
-					truncateHash(group.Hash))
+					suffix)
 			}
 		}
 		fmt.Println()

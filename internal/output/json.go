@@ -62,11 +62,19 @@ type JSONBlockInfo struct {
 
 // JSONConsistencyReport holds consistency check results
 type JSONConsistencyReport struct {
-	HeightConsensus bool     `json:"height_consensus"`
-	HashConsensus   bool     `json:"hash_consensus"`
-	MaxHeight       uint64   `json:"max_height"`
-	HeightVariance  int      `json:"height_variance_blocks"`
-	Issues          []string `json:"issues,omitempty"`
+	HeightConsensus bool              `json:"height_consensus"`
+	HashConsensus   bool              `json:"hash_consensus"`
+	MaxHeight       uint64            `json:"max_height"`
+	ReferenceHeight uint64            `json:"reference_height"`
+	HeightVariance  int               `json:"height_variance_blocks"`
+	HashGroups      []JSONHashGroup   `json:"hash_groups,omitempty"`
+	Issues          []string          `json:"issues,omitempty"`
+}
+
+// JSONHashGroup holds providers grouped by their hash
+type JSONHashGroup struct {
+	Hash      string   `json:"hash"`
+	Providers []string `json:"providers"`
 }
 
 // JSONAssessment holds the operational assessment
@@ -146,8 +154,17 @@ func convertToJSON(report *SnapshotReport) *JSONReport {
 		HeightConsensus: report.Consistency.HeightConsensus,
 		HashConsensus:   report.Consistency.HashConsensus,
 		MaxHeight:       report.Consistency.MaxHeight,
+		ReferenceHeight: report.Consistency.ReferenceHeight,
 		HeightVariance:  report.Consistency.HeightVariance,
 		Issues:          report.Consistency.Issues,
+	}
+
+	// Convert hash groups
+	for _, group := range report.Consistency.HashGroups {
+		jr.Consistency.HashGroups = append(jr.Consistency.HashGroups, JSONHashGroup{
+			Hash:      group.Hash,
+			Providers: group.Providers,
+		})
 	}
 
 	// Build assessment

@@ -1,11 +1,14 @@
 module github.com/dmagro/eth-rpc-monitor
 
-go 1.21
+go 1.24.0
+
+toolchain go1.24.11
 
 require (
 	github.com/fatih/color v1.16.0
 	github.com/rodaine/table v1.2.0
 	github.com/spf13/cobra v1.8.0
+	golang.org/x/sync v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dmagro/eth-rpc-monitor/internal/metrics"
@@ -115,20 +116,32 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 				green("✓ All providers in sync"),
 				padToWidth(41, cyan("│")))
 		} else {
-			var issues string
+			// Show height variance if any
 			if !consistency.HeightConsensus {
-				issues = fmt.Sprintf("⚠ %d block(s) variance", consistency.HeightVariance)
+				issues := fmt.Sprintf("⚠ %d block(s) variance", consistency.HeightVariance)
+				fmt.Printf("%s  Block Sync: %s%s\n",
+					cyan("│"),
+					yellow(issues),
+					padToWidth(50-len(issues), cyan("│")))
 			}
-			if !consistency.HashConsensus {
-				if issues != "" {
-					issues += ", "
+
+			// Show detailed hash mismatch information
+			if !consistency.HashConsensus && len(consistency.HashGroups) > 1 {
+				fmt.Printf("%s  Block Sync: %s at #%d\n",
+					cyan("│"),
+					yellow("⚠ Hash mismatch"),
+					consistency.ReferenceHeight)
+
+				for i, group := range consistency.HashGroups {
+					truncHash := truncateWatchHash(group.Hash)
+					providers := strings.Join(group.Providers, ", ")
+					suffix := ""
+					if i > 0 {
+						suffix = yellow(" ← minority")
+					}
+					fmt.Printf("%s    %s: %s%s\n", cyan("│"), truncHash, providers, suffix)
 				}
-				issues += "⚠ hash mismatch"
 			}
-			fmt.Printf("%s  Block Sync: %s%s\n",
-				cyan("│"),
-				yellow(issues),
-				padToWidth(50-len(issues), cyan("│")))
 		}
 	}
 
@@ -194,4 +207,12 @@ func padToWidth(remaining int, suffix string) string {
 		padding += " "
 	}
 	return padding + suffix
+}
+
+// truncateWatchHash shortens a hash for display
+func truncateWatchHash(hash string) string {
+	if len(hash) <= 14 {
+		return hash
+	}
+	return hash[:6] + "..." + hash[len(hash)-4:]
 }
