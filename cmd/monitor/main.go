@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -56,7 +57,30 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd)
+	var blocksRaw bool
+	var blocksFormat string
+	var blocksProvider string
+	blocksCmd := &cobra.Command{
+		Use:   "blocks [latest|number]",
+		Short: "Fetch and display block details",
+		Long: `Fetch block data from an Ethereum RPC provider.
+
+Examples:
+  monitor blocks latest
+  monitor blocks 19000000
+  monitor blocks 0x121eac0
+  monitor blocks latest --raw
+  monitor blocks latest --provider alchemy`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBlocks(cmd.Context(), cfgPath, args[0], blocksRaw, blocksFormat, blocksProvider)
+		},
+	}
+	blocksCmd.Flags().BoolVar(&blocksRaw, "raw", false, "Show raw JSON-RPC response")
+	blocksCmd.Flags().StringVar(&blocksFormat, "format", "terminal", "Output format: terminal|json")
+	blocksCmd.Flags().StringVar(&blocksProvider, "provider", "", "Use specific provider (default: first available)")
+
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -380,4 +404,104 @@ func statusSeverity(status metrics.ProviderStatus) output.EventSeverity {
 	default:
 		return output.SeverityInfo
 	}
+}
+
+func runBlocks(ctx context.Context, cfgPath, blockArg string, rawOutput bool, format, providerName string) error {
+	// Load config
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	// Parse block argument
+	blockNum, err := parseBlockArg(blockArg)
+	if err != nil {
+		return err
+	}
+
+	// Get provider client
+	client, usedProvider, err := getProviderClient(cfg, providerName)
+	if err != nil {
+		return err
+	}
+
+	// Fetch block
+	start := time.Now()
+	block, rawResponse, result := client.GetBlockByNumberWithRaw(ctx, blockNum, false)
+	latency := time.Since(start)
+
+	if !result.Success {
+		return fmt.Errorf("failed to fetch block: %v", result.Error)
+	}
+
+	if block == nil {
+		return fmt.Errorf("block %s not found", blockArg)
+	}
+
+	// Render output
+	bd := &output.BlockDisplay{
+		Block:       block,
+		Provider:    usedProvider,
+		Latency:     latency,
+		RawResponse: rawResponse,
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		output.DisableColors()
+		return output.RenderBlockJSON(bd, rawOutput)
+	case "terminal", "":
+		output.RenderBlockTerminal(bd, rawOutput)
+		return nil
+	default:
+		return fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+// parseBlockArg converts user input to hex block number for RPC
+func parseBlockArg(arg string) (string, error) {
+	arg = strings.TrimSpace(arg)
+
+	if arg == "latest" || arg == "pending" || arg == "earliest" {
+		return arg, nil
+	}
+
+	// Already hex
+	if strings.HasPrefix(arg, "0x") {
+		// Validate it's valid hex
+		_, err := strconv.ParseUint(arg[2:], 16, 64)
+		if err != nil {
+			return "", fmt.Errorf("invalid hex block number: %s", arg)
+		}
+		return arg, nil
+	}
+
+	// Decimal - convert to hex
+	num, err := strconv.ParseUint(arg, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid block number: %s (use decimal, hex with 0x prefix, or 'latest')", arg)
+	}
+	return fmt.Sprintf("0x%x", num), nil
+}
+
+// getProviderClient returns a client for the specified provider or first available
+func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, string, error) {
+	for _, p := range cfg.Providers {
+		if providerName == "" || p.Name == providerName {
+			client := rpc.NewClient(rpc.ClientConfig{
+				Name:           p.Name,
+				URL:            p.URL,
+				Timeout:        p.Timeout,
+				MaxRetries:     cfg.Defaults.MaxRetries,
+				BackoffInitial: cfg.Defaults.BackoffInitial,
+				BackoffMax:     cfg.Defaults.BackoffMax,
+			})
+			return client, p.Name, nil
+		}
+	}
+
+	if providerName != "" {
+		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
+	}
+	return nil, "", fmt.Errorf("no providers configured")
 }
