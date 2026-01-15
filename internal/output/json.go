@@ -11,10 +11,10 @@ import (
 
 // JSONReport is the machine-readable output format
 type JSONReport struct {
-	Metadata    JSONMetadata              `json:"metadata"`
-	Providers   []JSONProviderMetrics     `json:"providers"`
-	Consistency JSONConsistencyReport     `json:"consistency"`
-	Assessment  JSONAssessment            `json:"assessment"`
+	Metadata    JSONMetadata          `json:"metadata"`
+	Providers   []JSONProviderMetrics `json:"providers"`
+	Consistency JSONConsistencyReport `json:"consistency"`
+	Assessment  JSONAssessment        `json:"assessment"`
 }
 
 // JSONMetadata holds report metadata
@@ -26,12 +26,12 @@ type JSONMetadata struct {
 
 // JSONProviderMetrics holds provider metrics in JSON format
 type JSONProviderMetrics struct {
-	Name        string  `json:"name"`
-	Status      string  `json:"status"`
-	LatencyMs   JSONLatency `json:"latency_ms"`
-	SuccessRate float64 `json:"success_rate"`
-	TotalCalls  int     `json:"total_calls"`
-	Errors      JSONErrors `json:"errors"`
+	Name        string        `json:"name"`
+	Status      string        `json:"status"`
+	LatencyMs   JSONLatency   `json:"latency_ms"`
+	SuccessRate float64       `json:"success_rate"`
+	TotalCalls  int           `json:"total_calls"`
+	Errors      JSONErrors    `json:"errors"`
 	Block       JSONBlockInfo `json:"block"`
 }
 
@@ -65,17 +65,18 @@ type JSONConsistencyReport struct {
 	HeightConsensus bool     `json:"height_consensus"`
 	HashConsensus   bool     `json:"hash_consensus"`
 	MaxHeight       uint64   `json:"max_height"`
+	ReferenceHeight uint64   `json:"reference_height"`
 	HeightVariance  int      `json:"height_variance_blocks"`
 	Issues          []string `json:"issues,omitempty"`
 }
 
 // JSONAssessment holds the operational assessment
 type JSONAssessment struct {
-	Healthy     bool     `json:"healthy"`
-	UpProviders []string `json:"up_providers"`
+	Healthy           bool     `json:"healthy"`
+	UpProviders       []string `json:"up_providers"`
 	DegradedProviders []string `json:"degraded_providers,omitempty"`
-	DownProviders []string `json:"down_providers,omitempty"`
-	Recommendation string `json:"recommendation,omitempty"`
+	DownProviders     []string `json:"down_providers,omitempty"`
+	Recommendation    string   `json:"recommendation,omitempty"`
 }
 
 // RenderSnapshotJSON outputs the report as JSON to stdout
@@ -146,6 +147,7 @@ func convertToJSON(report *SnapshotReport) *JSONReport {
 		HeightConsensus: report.Consistency.HeightConsensus,
 		HashConsensus:   report.Consistency.HashConsensus,
 		MaxHeight:       report.Consistency.MaxHeight,
+		ReferenceHeight: report.Consistency.ReferenceHeight,
 		HeightVariance:  report.Consistency.HeightVariance,
 		Issues:          report.Consistency.Issues,
 	}
