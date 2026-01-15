@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"sort"
 )
 
 // ConsistencyReport holds the results of cross-provider consistency checks
@@ -100,6 +101,87 @@ func (c *ConsistencyChecker) Check(data []BlockHeightData) *ConsistencyReport {
 	// (We can only compare hashes at heights all providers have seen)
 	report.ReferenceHeight = minHeight
 	c.checkHashConsensus(report)
+
+	return report
+}
+
+// CheckWithSameHeightHashes performs consistency check using hashes fetched at the same block height
+func (c *ConsistencyChecker) CheckWithSameHeightHashes(
+	heights map[string]uint64,      // provider name -> their latest reported height
+	hashesAtRef map[string]string,  // provider name -> block hash at reference height  
+	referenceHeight uint64,         // the common height where we fetched all hashes
+) *ConsistencyReport {
+	report := &ConsistencyReport{
+		Heights:         heights,
+		Hashes:          hashesAtRef,
+		ReferenceHeight: referenceHeight,
+		Consistent:      true,
+	}
+
+	// Find max height
+	var maxHeight uint64
+	var maxProvider string
+	for provider, height := range heights {
+		if height > maxHeight {
+			maxHeight = height
+			maxProvider = provider
+		}
+	}
+	report.MaxHeight = maxHeight
+	report.AuthoritativeProvider = maxProvider
+
+	// Calculate height variance
+	var minHeight uint64 = maxHeight
+	for _, height := range heights {
+		if height < minHeight {
+			minHeight = height
+		}
+	}
+	report.HeightVariance = int(maxHeight - minHeight)
+	report.HeightConsensus = report.HeightVariance <= c.acceptableHeightDrift
+
+	if !report.HeightConsensus {
+		report.Consistent = false
+		report.Issues = append(report.Issues,
+			fmt.Sprintf("Block height variance of %d blocks exceeds threshold", report.HeightVariance))
+	}
+
+	// Group providers by their hash at reference height
+	hashToProviders := make(map[string][]string)
+	for provider, hash := range hashesAtRef {
+		if hash != "" { // Only include providers that successfully returned a hash
+			hashToProviders[hash] = append(hashToProviders[hash], provider)
+		}
+	}
+
+	// Build hash groups
+	for hash, providers := range hashToProviders {
+		report.HashGroups = append(report.HashGroups, HashGroup{
+			Hash:      hash,
+			Providers: providers,
+		})
+	}
+
+	// Sort hash groups by number of providers (descending) for consistent output
+	sort.Slice(report.HashGroups, func(i, j int) bool {
+		return len(report.HashGroups[i].Providers) > len(report.HashGroups[j].Providers)
+	})
+
+	// Check hash consensus
+	report.HashConsensus = len(report.HashGroups) <= 1
+
+	if !report.HashConsensus && len(report.HashGroups) > 1 {
+		report.Consistent = false
+		// Identify minority groups (not the largest)
+		majorityCount := len(report.HashGroups[0].Providers)
+		for _, group := range report.HashGroups[1:] {
+			if len(group.Providers) < majorityCount {
+				report.Issues = append(report.Issues,
+					fmt.Sprintf("Provider(s) %v report different block hash at height %d (possible reorg or stale cache)",
+						group.Providers, referenceHeight))
+			}
+		}
+	}
 
 	return report
 }
