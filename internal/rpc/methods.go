@@ -151,6 +151,32 @@ func Uint64ToHex(n uint64) string {
 	return fmt.Sprintf("0x%x", n)
 }
 
+// EthCall performs an eth_call to query contract state
+func (c *Client) EthCall(ctx context.Context, to string, data string, blockTag string) (string, *CallResult) {
+	params := []interface{}{
+		map[string]string{
+			"to":   to,
+			"data": data,
+		},
+		blockTag,
+	}
+
+	result := c.Call(ctx, "eth_call", params...)
+	if !result.Success {
+		return "", result
+	}
+
+	var hexResult string
+	if err := json.Unmarshal(result.Response.Result, &hexResult); err != nil {
+		result.Success = false
+		result.Error = fmt.Errorf("failed to parse eth_call result: %w", err)
+		result.ErrorType = ErrorTypeParseError
+		return "", result
+	}
+
+	return hexResult, result
+}
+
 // Transaction represents a parsed Ethereum transaction
 type Transaction struct {
 	Hash        string
