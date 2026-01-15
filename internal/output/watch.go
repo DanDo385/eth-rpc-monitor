@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dmagro/eth-rpc-monitor/internal/metrics"
@@ -114,6 +115,21 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 				cyan("│"),
 				green("✓ All providers in sync"),
 				padToWidth(41, cyan("│")))
+		} else if !consistency.HashConsensus && len(consistency.HashGroups) > 1 {
+			fmt.Printf("%s  Block Sync: %s at #%d\n",
+				cyan("│"),
+				yellow("⚠ Hash mismatch"),
+				consistency.ReferenceHeight)
+
+			for i, group := range consistency.HashGroups {
+				truncHash := truncateHash(group.Hash)
+				providers := strings.Join(group.Providers, ", ")
+				suffix := ""
+				if i > 0 {
+					suffix = " ← minority"
+				}
+				fmt.Printf("%s    %s: %s%s\n", cyan("│"), truncHash, providers, suffix)
+			}
 		} else {
 			var issues string
 			if !consistency.HeightConsensus {

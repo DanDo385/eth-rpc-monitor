@@ -115,6 +115,7 @@ func renderConsistencyCheck(c *metrics.ConsistencyReport) {
 	fmt.Printf("  Network Height: %s (via %s)\n",
 		cyan(fmt.Sprintf("%d", c.MaxHeight)),
 		c.AuthoritativeProvider)
+	fmt.Printf("  Reference Height: %s\n", cyan(fmt.Sprintf("%d", c.ReferenceHeight)))
 	fmt.Println()
 
 	headerFmt := color.New(color.FgCyan, color.Underline).SprintfFunc()
