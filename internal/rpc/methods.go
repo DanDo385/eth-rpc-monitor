@@ -37,39 +37,50 @@ func (c *Client) BlockNumber(ctx context.Context) (uint64, *CallResult) {
 
 // Block represents a simplified Ethereum block
 type Block struct {
-	Number     uint64
-	Hash       string
-	ParentHash string
-	Timestamp  uint64
-	GasUsed    uint64
-	GasLimit   uint64
-	TxCount    int
+	Number        uint64
+	Hash          string
+	ParentHash    string
+	Timestamp     uint64
+	GasUsed       uint64
+	GasLimit      uint64
+	BaseFeePerGas *big.Int // nil for pre-EIP-1559 blocks
+	TxCount       int
 }
 
 // GetBlockByNumber calls eth_getBlockByNumber and returns block data
 // If fullTx is false, only transaction hashes are returned (lighter call)
 func (c *Client) GetBlockByNumber(ctx context.Context, blockNum string, fullTx bool) (*Block, *CallResult) {
+	block, _, result := c.GetBlockByNumberWithRaw(ctx, blockNum, fullTx)
+	return block, result
+}
+
+// GetBlockByNumberWithRaw returns block data and raw JSON response
+func (c *Client) GetBlockByNumberWithRaw(ctx context.Context, blockNum string, fullTx bool) (*Block, json.RawMessage, *CallResult) {
 	result := c.Call(ctx, "eth_getBlockByNumber", blockNum, fullTx)
 	if !result.Success {
-		return nil, result
+		return nil, nil, result
 	}
+
+	// Store raw response before parsing
+	rawResponse := result.Response.Result
 
 	// Parse the block response
 	var blockData struct {
-		Number       string        `json:"number"`
-		Hash         string        `json:"hash"`
-		ParentHash   string        `json:"parentHash"`
-		Timestamp    string        `json:"timestamp"`
-		GasUsed      string        `json:"gasUsed"`
-		GasLimit     string        `json:"gasLimit"`
-		Transactions []interface{} `json:"transactions"`
+		Number        string        `json:"number"`
+		Hash          string        `json:"hash"`
+		ParentHash    string        `json:"parentHash"`
+		Timestamp     string        `json:"timestamp"`
+		GasUsed       string        `json:"gasUsed"`
+		GasLimit      string        `json:"gasLimit"`
+		BaseFeePerGas string        `json:"baseFeePerGas,omitempty"`
+		Transactions  []interface{} `json:"transactions"`
 	}
 
 	if err := json.Unmarshal(result.Response.Result, &blockData); err != nil {
 		result.Success = false
 		result.Error = fmt.Errorf("failed to parse block: %w", err)
 		result.ErrorType = ErrorTypeParseError
-		return nil, result
+		return nil, nil, result
 	}
 
 	blockNum64, _ := parseHexUint64(blockData.Number)
@@ -77,17 +88,23 @@ func (c *Client) GetBlockByNumber(ctx context.Context, blockNum string, fullTx b
 	gasUsed, _ := parseHexUint64(blockData.GasUsed)
 	gasLimit, _ := parseHexUint64(blockData.GasLimit)
 
-	block := &Block{
-		Number:     blockNum64,
-		Hash:       blockData.Hash,
-		ParentHash: blockData.ParentHash,
-		Timestamp:  timestamp,
-		GasUsed:    gasUsed,
-		GasLimit:   gasLimit,
-		TxCount:    len(blockData.Transactions),
+	var baseFee *big.Int
+	if blockData.BaseFeePerGas != "" {
+		baseFee, _ = parseHexBigInt(blockData.BaseFeePerGas)
 	}
 
-	return block, result
+	block := &Block{
+		Number:        blockNum64,
+		Hash:          blockData.Hash,
+		ParentHash:    blockData.ParentHash,
+		Timestamp:     timestamp,
+		GasUsed:       gasUsed,
+		GasLimit:      gasLimit,
+		BaseFeePerGas: baseFee,
+		TxCount:       len(blockData.Transactions),
+	}
+
+	return block, rawResponse, result
 }
 
 // GetLatestBlock is a convenience method to get the latest block
@@ -113,6 +130,20 @@ func parseHexUint64(hex string) (uint64, error) {
 	}
 
 	return val.Uint64(), nil
+}
+
+// parseHexBigInt parses a hex string into a big.Int
+func parseHexBigInt(hex string) (*big.Int, error) {
+	hex = strings.TrimPrefix(hex, "0x")
+	if hex == "" {
+		return big.NewInt(0), nil
+	}
+	val := new(big.Int)
+	_, ok := val.SetString(hex, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid hex string: %s", hex)
+	}
+	return val, nil
 }
 
 // Uint64ToHex converts a uint64 to a hex string with 0x prefix for RPC calls

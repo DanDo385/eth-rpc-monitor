@@ -23,12 +23,12 @@ type Client struct {
 	backoffMax     time.Duration
 
 	// Circuit breaker state
-	mu                sync.RWMutex
-	consecutiveFails  int
-	circuitOpen       bool
-	circuitOpenUntil  time.Time
-	circuitThreshold  int           // failures before opening
-	circuitCooldown   time.Duration // how long to wait before retry
+	mu               sync.RWMutex
+	consecutiveFails int
+	circuitOpen      bool
+	circuitOpenUntil time.Time
+	circuitThreshold int           // failures before opening
+	circuitCooldown  time.Duration // how long to wait before retry
 }
 
 // ClientConfig holds configuration for creating a new RPC client
