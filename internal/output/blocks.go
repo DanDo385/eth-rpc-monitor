@@ -279,13 +279,6 @@ func formatBaseFeeRaw(fee *big.Int) string {
 	return fee.String()
 }
 
-func truncateHash(hash string) string {
-	if len(hash) <= 15 {
-		return hash
-	}
-	return hash[:6] + "..." + hash[len(hash)-4:]
-}
-
 func truncateAddress(addr string) string {
 	if addr == "" {
 		return ""
