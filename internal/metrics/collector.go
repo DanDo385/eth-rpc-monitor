@@ -1,7 +1,11 @@
 package metrics
 
 import (
+	"encoding/json"
+	"fmt"
+	"math/big"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dmagro/eth-rpc-monitor/internal/rpc"
@@ -95,6 +99,20 @@ func calculateProviderMetrics(name string, samples []rpc.CallResult) *ProviderMe
 		if s.Success {
 			successCount++
 			latencies = append(latencies, s.Latency)
+
+			// Best-effort extract latest block number/hash from eth_getBlockByNumber responses.
+			if s.Method == "eth_getBlockByNumber" && s.Response != nil {
+				var blockData struct {
+					Number string `json:"number"`
+					Hash   string `json:"hash"`
+				}
+				if err := json.Unmarshal(s.Response.Result, &blockData); err == nil {
+					if n, err := parseHexUint64(blockData.Number); err == nil {
+						m.LatestBlock = n
+						m.LatestBlockHash = blockData.Hash
+					}
+				}
+			}
 		} else {
 			m.Failures++
 
@@ -136,12 +154,29 @@ func calculateProviderMetrics(name string, samples []rpc.CallResult) *ProviderMe
 	return m
 }
 
+func parseHexUint64(hex string) (uint64, error) {
+	hex = strings.TrimPrefix(hex, "0x")
+	if hex == "" {
+		return 0, nil
+	}
+
+	val := new(big.Int)
+	_, ok := val.SetString(hex, 16)
+	if !ok {
+		return 0, fmt.Errorf("invalid hex string: %s", hex)
+	}
+	if !val.IsUint64() {
+		return 0, fmt.Errorf("value overflows uint64: %s", hex)
+	}
+	return val.Uint64(), nil
+}
+
 // determineStatus categorizes provider health based on metrics
 func determineStatus(successRate float64, p95Latency time.Duration) ProviderStatus {
 	// Thresholds (these could be configurable)
 	const (
-		downThreshold     = 50.0          // <50% success = DOWN
-		degradedThreshold = 90.0          // <90% success = DEGRADED
+		downThreshold     = 50.0 // <50% success = DOWN
+		degradedThreshold = 90.0 // <90% success = DEGRADED
 		slowLatency       = 500 * time.Millisecond
 	)
 

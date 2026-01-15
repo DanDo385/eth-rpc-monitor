@@ -136,13 +136,16 @@ func renderConsistencyCheck(c *metrics.ConsistencyReport) {
 	tbl.Print()
 	fmt.Println()
 
-	// Hash consistency
-	if len(c.HashGroups) > 0 {
+	// Hash consistency (at reference height)
+	if c.ReferenceHeight > 0 {
 		fmt.Println(bold("Block Hash Consistency"))
-		if c.HashConsensus {
+		fmt.Printf("  Reference Height: %s\n", cyan(fmt.Sprintf("%d", c.ReferenceHeight)))
+		if len(c.HashGroups) == 0 {
+			fmt.Printf("  %s Unable to fetch comparable hashes from providers\n", yellow("⚠"))
+		} else if c.HashConsensus {
 			fmt.Printf("  %s All providers report consistent block hash\n", green("✓"))
 		} else {
-			fmt.Printf("  %s HASH MISMATCH DETECTED\n", red("✗"))
+			fmt.Printf("  %s HASH MISMATCH DETECTED at #%d\n", red("✗"), c.ReferenceHeight)
 			for _, group := range c.HashGroups {
 				fmt.Printf("    %s: %s\n",
 					strings.Join(group.Providers, ", "),
