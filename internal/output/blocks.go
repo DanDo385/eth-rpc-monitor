@@ -19,10 +19,13 @@ var (
 
 // BlockDisplay holds block data for rendering
 type BlockDisplay struct {
-	Block       *rpc.Block
-	Provider    string
-	Latency     time.Duration
-	RawResponse json.RawMessage
+	Block                *rpc.Block
+	Provider             string
+	Latency              time.Duration
+	RawResponse          json.RawMessage
+	AutoSelected         bool
+	SelectionSuccessRate float64
+	SelectionP95Latency  time.Duration
 }
 
 // RenderBlockTerminal outputs block details to terminal
@@ -40,6 +43,9 @@ func RenderBlockTerminal(bd *BlockDisplay, showRaw bool) {
 	block := bd.Block
 
 	fmt.Println()
+	if bd.AutoSelected {
+		renderAutoSelectedNote(bd.Provider, bd.SelectionSuccessRate, bd.SelectionP95Latency)
+	}
 	fmt.Printf("%s\n", blockBold(fmt.Sprintf("Block #%d", block.Number)))
 	fmt.Println("═══════════════════════════════════════════════════════")
 	fmt.Printf("  %s           %s\n", blockCyan("Hash:"), block.Hash)
@@ -151,13 +157,16 @@ func formatBaseFeeRaw(fee *big.Int) string {
 
 // TxDisplay holds transaction list for rendering
 type TxDisplay struct {
-	BlockNumber  uint64
-	Transactions []rpc.Transaction
-	TotalCount   int
-	Limit        int
-	Provider     string
-	Latency      time.Duration
-	RawResponse  json.RawMessage
+	BlockNumber          uint64
+	Transactions         []rpc.Transaction
+	TotalCount           int
+	Limit                int
+	Provider             string
+	Latency              time.Duration
+	RawResponse          json.RawMessage
+	AutoSelected         bool
+	SelectionSuccessRate float64
+	SelectionP95Latency  time.Duration
 }
 
 // RenderTxsTerminal outputs transaction list to terminal
@@ -186,6 +195,9 @@ func RenderTxsTerminal(td *TxDisplay, showRaw bool) {
 	}
 
 	fmt.Println()
+	if td.AutoSelected {
+		renderAutoSelectedNote(td.Provider, td.SelectionSuccessRate, td.SelectionP95Latency)
+	}
 	fmt.Printf("%s\n", blockBold(fmt.Sprintf("Transactions in Block #%d", td.BlockNumber)))
 	fmt.Printf("Showing %d of %d transactions\n", shown, td.TotalCount)
 	fmt.Println("════════════════════════════════════════════════════════════════════════════")

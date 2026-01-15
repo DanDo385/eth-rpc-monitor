@@ -13,22 +13,28 @@ import (
 
 // CallDisplay holds eth_call result for rendering
 type CallDisplay struct {
-	Contract     string
-	ContractName string
-	Method       string
-	Address      string
-	RawResult    string
-	Calldata     string
-	ParsedValue  *big.Int
-	Decimals     int
-	Symbol       string
-	Provider     string
-	Latency      time.Duration
+	Contract             string
+	ContractName         string
+	Method               string
+	Address              string
+	RawResult            string
+	Calldata             string
+	ParsedValue          *big.Int
+	Decimals             int
+	Symbol               string
+	Provider             string
+	Latency              time.Duration
+	AutoSelected         bool
+	SelectionSuccessRate float64
+	SelectionP95Latency  time.Duration
 }
 
 // RenderCallTerminal outputs call result to terminal
 func RenderCallTerminal(cd *CallDisplay, showRaw bool) {
 	fmt.Println()
+	if cd.AutoSelected {
+		renderAutoSelectedNote(cd.Provider, cd.SelectionSuccessRate, cd.SelectionP95Latency)
+	}
 	fmt.Printf("%s\n", blockBold(fmt.Sprintf("%s Balance Query", cd.Symbol)))
 	fmt.Println("═══════════════════════════════════════════════════════")
 	fmt.Printf("  %s      %s (%s)\n", blockCyan("Contract:"), truncateAddress(cd.Contract), cd.ContractName)

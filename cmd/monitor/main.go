@@ -19,6 +19,7 @@ import (
 	"github.com/dmagro/eth-rpc-monitor/internal/config"
 	"github.com/dmagro/eth-rpc-monitor/internal/metrics"
 	"github.com/dmagro/eth-rpc-monitor/internal/output"
+	"github.com/dmagro/eth-rpc-monitor/internal/provider"
 	"github.com/dmagro/eth-rpc-monitor/internal/rpc"
 )
 
@@ -57,7 +58,7 @@ func main() {
 	}
 	watchCmd.Flags().DurationVar(&refresh, "refresh", 5*time.Second, "Refresh interval")
 
-	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd())
+	rootCmd.AddCommand(snapshotCmd, watchCmd, blocksCmd(), txsCmd(), callCmd(), statusCmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -229,7 +230,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw JSON-RPC response")
-	cmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider (default: first available)")
+	cmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider (auto-select if omitted)")
 	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
 
 	return cmd
@@ -249,7 +250,7 @@ func runBlocks(ctx context.Context, blockArg string, rawOutput bool, providerNam
 	}
 
 	// Get provider client
-	client, usedProvider, err := getProviderClient(cfg, providerName)
+	client, selection, autoSelected, err := getProviderClient(cfg, providerName)
 	if err != nil {
 		return err
 	}
@@ -273,10 +274,13 @@ func runBlocks(ctx context.Context, blockArg string, rawOutput bool, providerNam
 
 	// Render output
 	bd := &output.BlockDisplay{
-		Block:       block,
-		Provider:    usedProvider,
-		Latency:     latency,
-		RawResponse: rawResponse,
+		Block:                block,
+		Provider:             selection.Name,
+		Latency:              latency,
+		RawResponse:          rawResponse,
+		AutoSelected:         autoSelected,
+		SelectionSuccessRate: selection.SuccessRate,
+		SelectionP95Latency:  selection.P95Latency,
 	}
 
 	if format == "json" {
@@ -317,7 +321,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw JSON transaction array")
-	cmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider")
+	cmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider (auto-select if omitted)")
 	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum transactions to display (0 for all)")
 	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
 
@@ -335,7 +339,7 @@ func runTxs(ctx context.Context, blockArg string, rawOutput bool, providerName s
 		return err
 	}
 
-	client, usedProvider, err := getProviderClient(cfg, providerName)
+	client, selection, autoSelected, err := getProviderClient(cfg, providerName)
 	if err != nil {
 		return err
 	}
@@ -357,13 +361,16 @@ func runTxs(ctx context.Context, blockArg string, rawOutput bool, providerName s
 	}
 
 	td := &output.TxDisplay{
-		BlockNumber:  blockWithTxs.Number,
-		Transactions: blockWithTxs.Transactions,
-		TotalCount:   len(blockWithTxs.Transactions),
-		Limit:        limit,
-		Provider:     usedProvider,
-		Latency:      latency,
-		RawResponse:  rawResponse,
+		BlockNumber:          blockWithTxs.Number,
+		Transactions:         blockWithTxs.Transactions,
+		TotalCount:           len(blockWithTxs.Transactions),
+		Limit:                limit,
+		Provider:             selection.Name,
+		Latency:              latency,
+		RawResponse:          rawResponse,
+		AutoSelected:         autoSelected,
+		SelectionSuccessRate: selection.SuccessRate,
+		SelectionP95Latency:  selection.P95Latency,
 	}
 
 	if format == "json" {
@@ -412,7 +419,7 @@ Examples:
 	}
 
 	balanceCmd.Flags().BoolVar(&rawOutput, "raw", false, "Show raw calldata and response")
-	balanceCmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider")
+	balanceCmd.Flags().StringVar(&providerName, "provider", "", "Use specific provider (auto-select if omitted)")
 	balanceCmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
 
 	usdcCmd.AddCommand(balanceCmd)
@@ -431,7 +438,7 @@ func runCallBalance(ctx context.Context, address, contract, symbol string, decim
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	client, usedProvider, err := getProviderClient(cfg, providerName)
+	client, selection, autoSelected, err := getProviderClient(cfg, providerName)
 	if err != nil {
 		return err
 	}
@@ -458,17 +465,20 @@ func runCallBalance(ctx context.Context, address, contract, symbol string, decim
 	}
 
 	cd := &output.CallDisplay{
-		Contract:     contract,
-		ContractName: symbol,
-		Method:       "balanceOf",
-		Address:      address,
-		RawResult:    rawResult,
-		Calldata:     calldata,
-		ParsedValue:  balance,
-		Decimals:     decimals,
-		Symbol:       symbol,
-		Provider:     usedProvider,
-		Latency:      latency,
+		Contract:             contract,
+		ContractName:         symbol,
+		Method:               "balanceOf",
+		Address:              address,
+		RawResult:            rawResult,
+		Calldata:             calldata,
+		ParsedValue:          balance,
+		Decimals:             decimals,
+		Symbol:               symbol,
+		Provider:             selection.Name,
+		Latency:              latency,
+		AutoSelected:         autoSelected,
+		SelectionSuccessRate: selection.SuccessRate,
+		SelectionP95Latency:  selection.P95Latency,
 	}
 
 	if format == "json" {
@@ -477,6 +487,60 @@ func runCallBalance(ctx context.Context, address, contract, symbol string, decim
 	}
 
 	output.RenderCallTerminal(cd, rawOutput)
+	return nil
+}
+
+func statusCmd() *cobra.Command {
+	var samples int
+	var format string
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Quick health check and provider ranking",
+		Long: `Perform a quick health check on all configured providers and rank them.
+
+This is useful for:
+- Seeing which providers are healthy
+- Understanding which provider to use as primary
+- Diagnosing provider issues
+
+Example:
+  monitor status`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfgPath, _ := cmd.Flags().GetString("config")
+			if cfgPath == "" {
+				cfgPath, _ = cmd.Root().PersistentFlags().GetString("config")
+			}
+			return runStatus(cmd.Context(), samples, format, cfgPath)
+		},
+	}
+
+	cmd.Flags().IntVar(&samples, "samples", 5, "Number of samples per provider")
+	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+
+	return cmd
+}
+
+func runStatus(ctx context.Context, samples int, format string, cfgPath string) error {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(reqCtx, cfg, samples)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+
+	if format == "json" {
+		output.DisableColors()
+		return output.RenderStatusJSON(ranked)
+	}
+
+	output.RenderStatusTerminal(ranked)
 	return nil
 }
 
@@ -506,10 +570,32 @@ func parseBlockArg(arg string) (string, error) {
 	return fmt.Sprintf("0x%x", num), nil
 }
 
-// getProviderClient returns a client for the specified provider or first available
-func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, string, error) {
-	for _, p := range cfg.Providers {
-		if providerName == "" || p.Name == providerName {
+// getProviderClient returns a client for the specified provider or auto-selects best
+func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, provider.ProviderHealth, bool, error) {
+	if providerName != "" {
+		for _, p := range cfg.Providers {
+			if p.Name == providerName {
+				client := rpc.NewClient(rpc.ClientConfig{
+					Name:           p.Name,
+					URL:            p.URL,
+					Timeout:        p.Timeout,
+					MaxRetries:     cfg.Defaults.MaxRetries,
+					BackoffInitial: cfg.Defaults.BackoffInitial,
+					BackoffMax:     cfg.Defaults.BackoffMax,
+				})
+				return client, provider.ProviderHealth{Name: p.Name}, false, nil
+			}
+		}
+		return nil, provider.ProviderHealth{}, false, fmt.Errorf("provider '%s' not found in config", providerName)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ranked, err := provider.QuickHealthCheck(ctx, cfg, 3)
+	if err != nil {
+		if len(cfg.Providers) > 0 {
+			p := cfg.Providers[0]
 			client := rpc.NewClient(rpc.ClientConfig{
 				Name:           p.Name,
 				URL:            p.URL,
@@ -518,14 +604,32 @@ func getProviderClient(cfg *config.Config, providerName string) (*rpc.Client, st
 				BackoffInitial: cfg.Defaults.BackoffInitial,
 				BackoffMax:     cfg.Defaults.BackoffMax,
 			})
-			return client, p.Name, nil
+			fmt.Fprintf(os.Stderr, "Warning: health check failed, using first provider: %s\n", p.Name)
+			return client, provider.ProviderHealth{Name: p.Name}, false, nil
+		}
+		return nil, provider.ProviderHealth{}, false, fmt.Errorf("no providers available")
+	}
+
+	best, bestErr := ranked.Best()
+	if bestErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", bestErr)
+	}
+
+	for _, p := range cfg.Providers {
+		if p.Name == best.Name {
+			client := rpc.NewClient(rpc.ClientConfig{
+				Name:           p.Name,
+				URL:            p.URL,
+				Timeout:        p.Timeout,
+				MaxRetries:     cfg.Defaults.MaxRetries,
+				BackoffInitial: cfg.Defaults.BackoffInitial,
+				BackoffMax:     cfg.Defaults.BackoffMax,
+			})
+			return client, best, true, nil
 		}
 	}
 
-	if providerName != "" {
-		return nil, "", fmt.Errorf("provider '%s' not found in config", providerName)
-	}
-	return nil, "", fmt.Errorf("no providers configured")
+	return nil, provider.ProviderHealth{}, false, fmt.Errorf("selected provider not found in config")
 }
 
 func loadConfig(path string) (*config.Config, error) {
