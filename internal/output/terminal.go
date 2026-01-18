@@ -41,9 +41,9 @@ func RenderSnapshotTerminal(report *SnapshotReport) {
 func renderHeader(timestamp time.Time, samples int) {
 	fmt.Println()
 	fmt.Println(cyan("╭─────────────────────────────────────────────────────────────────╮"))
-	fmt.Println(cyan("│") + bold("           Ethereum RPC Infrastructure Report                   ") + cyan("│"))
-	fmt.Printf("%s                    %-37s%s\n", cyan("│"), timestamp.Format("2006-01-02 15:04:05 MST"), cyan("│"))
-	fmt.Printf("%s                      Sample Size: %-25d%s\n", cyan("│"), samples, cyan("│"))
+	fmt.Println(bold("           Ethereum RPC Infrastructure Report"))
+	fmt.Printf("                    %s\n", timestamp.Format("2006-01-02 15:04:05 MST"))
+	fmt.Printf("                      Sample Size: %d\n", samples)
 	fmt.Println(cyan("╰─────────────────────────────────────────────────────────────────╯"))
 	fmt.Println()
 }
@@ -52,23 +52,38 @@ func renderProviderPerformance(providers map[string]*metrics.ProviderMetrics) {
 	fmt.Println(bold("Provider Performance"))
 
 	headerFmt := color.New(color.FgCyan, color.Underline).SprintfFunc()
-	tbl := table.New("Provider", "Status", "p50", "p95", "p99", "Max", "Success")
-	tbl.WithHeaderFormatter(headerFmt)
 
+	// Print header with fixed widths
+	// Column widths: Provider(12) Status(8) p50(8) p95(8) p99(8) Max(8) Success(10)
+	// Status column is 8 chars to accommodate "⚠ SLOW" visually (ANSI codes don't count visually)
+	fmt.Printf("%-12s %-8s %8s %8s %8s %8s %10s\n",
+		headerFmt("Provider"),
+		headerFmt("Status"),
+		headerFmt("p50"),
+		headerFmt("p95"),
+		headerFmt("p99"),
+		headerFmt("Max"),
+		headerFmt("Success"))
+
+	// Print separator line (total width: 12+1+8+1+8+1+8+1+8+1+8+1+10 = 66)
+	fmt.Println(strings.Repeat("-", 66))
+
+	// Print rows with fixed widths
+	// Status values visually: "✓ UP" (5), "⚠ SLOW" (7), "⚠ DEG" (6), "✗ DOWN" (7)
+	// Using 8 chars width - ANSI codes add bytes but not visual width
 	for _, m := range providers {
 		status := formatStatus(m.Status)
-		tbl.AddRow(
+		success := formatSuccessRate(m.SuccessRate)
+		fmt.Printf("%-12s %-8s %8s %8s %8s %8s %10s\n",
 			m.Name,
 			status,
 			formatDuration(m.LatencyP50),
 			formatDuration(m.LatencyP95),
 			formatDuration(m.LatencyP99),
 			formatDuration(m.LatencyMax),
-			formatSuccessRate(m.SuccessRate),
-		)
+			success)
 	}
 
-	tbl.Print()
 	fmt.Println()
 }
 
@@ -156,7 +171,6 @@ func renderConsistencyCheck(c *metrics.ConsistencyReport) {
 
 func renderAssessment(report *SnapshotReport) {
 	fmt.Println(bold("Operational Assessment"))
-	fmt.Println("  ┌─────────────────────────────────────────────────────────────────┐")
 
 	// Provider recommendations
 	var upProviders, degradedProviders, downProviders []string
@@ -175,39 +189,38 @@ func renderAssessment(report *SnapshotReport) {
 	}
 
 	if len(downProviders) > 0 {
-		fmt.Printf("  │ %s %-60s│\n", red("✗"),
+		fmt.Printf("  %s %s\n", red("✗"),
 			fmt.Sprintf("%s unsuitable for production use", strings.Join(downProviders, ", ")))
 	}
 
 	if len(degradedProviders) > 0 {
-		fmt.Printf("  │ %s %-60s│\n", yellow("⚠"),
+		fmt.Printf("  %s %s\n", yellow("⚠"),
 			fmt.Sprintf("%s showing degraded performance", strings.Join(degradedProviders, ", ")))
 	}
 
 	if len(upProviders) > 0 {
-		fmt.Printf("  │ %s %-60s│\n", green("✓"),
+		fmt.Printf("  %s %s\n", green("✓"),
 			fmt.Sprintf("%s performing within expected parameters", strings.Join(upProviders, ", ")))
 	}
 
 	// Consistency issues
 	if !report.Consistency.Consistent {
 		for _, issue := range report.Consistency.Issues {
-			wrapped := wrapText(issue, 58)
+			wrapped := wrapText(issue, 70)
 			for _, line := range wrapped {
-				fmt.Printf("  │ %s %-60s│\n", yellow("⚠"), line)
+				fmt.Printf("  %s %s\n", yellow("⚠"), line)
 			}
 		}
 	}
 
-	fmt.Println("  │                                                                 │")
+	fmt.Println()
 
 	// Recommendation
 	if len(upProviders) > 0 {
 		rec := fmt.Sprintf("Recommended priority: %s", strings.Join(upProviders, " → "))
-		fmt.Printf("  │ %-63s│\n", rec)
+		fmt.Printf("  %s\n", rec)
 	}
 
-	fmt.Println("  └─────────────────────────────────────────────────────────────────┘")
 	fmt.Println()
 }
 

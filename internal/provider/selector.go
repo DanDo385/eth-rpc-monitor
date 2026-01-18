@@ -62,7 +62,7 @@ func QuickHealthCheck(ctx context.Context, cfg *config.Config, samples int) (Ran
 	g, gctx := errgroup.WithContext(ctx)
 
 	for name, client := range clients {
-		name, client := name, client
+		name, client := name, client // shadow the loop variables to avoid closure issues
 		g.Go(func() error {
 			for i := 0; i < samples; i++ {
 				select {

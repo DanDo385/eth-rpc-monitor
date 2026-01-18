@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ func snapshotCmd() *cobra.Command {
 	var samples int
 	var intervalMs int
 	var format string
+	var outputPath string
 
 	cmd := &cobra.Command{
 		Use:   "snapshot",
@@ -27,18 +30,19 @@ func snapshotCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath, _ := cmd.Root().PersistentFlags().GetString("config")
 			interval := time.Duration(intervalMs) * time.Millisecond
-			return runSnapshot(cmd.Context(), cfgPath, samples, interval, format)
+			return runSnapshot(cmd.Context(), cfgPath, samples, interval, format, outputPath)
 		},
 	}
 
 	cmd.Flags().IntVar(&samples, "samples", 30, "Number of samples per provider")
 	cmd.Flags().IntVar(&intervalMs, "interval", 100, "Interval between samples in milliseconds")
 	cmd.Flags().StringVar(&format, "format", "terminal", "Output format: terminal|json")
+	cmd.Flags().StringVar(&outputPath, "output", "", "Save JSON report to file (auto-generates timestamped filename in reports/ if directory, or uses specified path)")
 
 	return cmd
 }
 
-func runSnapshot(ctx context.Context, cfgPath string, samples int, interval time.Duration, format string) error {
+func runSnapshot(ctx context.Context, cfgPath string, samples int, interval time.Duration, format string, outputPath string) error {
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return err
@@ -98,6 +102,41 @@ func runSnapshot(ctx context.Context, cfgPath string, samples int, interval time
 	switch strings.ToLower(format) {
 	case "json":
 		output.DisableColors()
+
+		// Handle output file if specified
+		if outputPath != "" {
+			var filePath string
+			if outputPath == "reports/" || outputPath == "reports" {
+				// Auto-generate timestamped filename
+				timestamp := time.Now().Format("20060102-150405")
+				filePath = filepath.Join("reports", fmt.Sprintf("snapshot-%s.json", timestamp))
+			} else {
+				filePath = outputPath
+			}
+
+			// Ensure reports directory exists if needed
+			dir := filepath.Dir(filePath)
+			if dir != "." && dir != "" {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return fmt.Errorf("failed to create output directory: %w", err)
+				}
+			}
+
+			file, err := os.Create(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to create output file: %w", err)
+			}
+			defer file.Close()
+
+			// Render JSON to file instead of stdout
+			if err := output.RenderSnapshotJSONToFile(report, file); err != nil {
+				return fmt.Errorf("failed to write JSON: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "Report saved to: %s\n", filePath)
+			return nil
+		}
+
 		return output.RenderSnapshotJSON(report)
 	case "terminal", "":
 		output.RenderSnapshotTerminal(report)

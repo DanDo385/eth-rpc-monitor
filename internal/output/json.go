@@ -81,9 +81,14 @@ type JSONAssessment struct {
 
 // RenderSnapshotJSON outputs the report as JSON to stdout
 func RenderSnapshotJSON(report *SnapshotReport) error {
+	return RenderSnapshotJSONToFile(report, os.Stdout)
+}
+
+// RenderSnapshotJSONToFile outputs the report as JSON to the specified file
+func RenderSnapshotJSONToFile(report *SnapshotReport, w *os.File) error {
 	jsonReport := convertToJSON(report)
 
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 
 	return encoder.Encode(jsonReport)

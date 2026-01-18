@@ -19,11 +19,11 @@ var (
 
 // BlockDisplay holds block data for rendering
 type BlockDisplay struct {
-	Block       *rpc.Block
-	Provider    string
-	Latency     time.Duration
-	RawResponse json.RawMessage
-	IsAutoSelected bool
+	Block       *rpc.Block // nil for pre-EIP-1559 blocks
+	Provider    string // name of the provider that provided the block
+	Latency     time.Duration // latency of the RPC call
+	RawResponse json.RawMessage // raw JSON response from the RPC call
+	IsAutoSelected bool // true if the block was automatically selected as the best provider
 }
 
 // RenderBlockTerminal outputs block details to terminal

@@ -82,7 +82,6 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 	// Header
 	fmt.Printf("%s Ethereum RPC Monitor ─────────────────── %s (refresh: %s) %s\n",
 		cyan("╭─"), now, state.Refresh, cyan("─╮"))
-	fmt.Println(cyan("│") + "                                                                   " + cyan("│"))
 
 	// Provider status lines (sorted by name for consistent display)
 	providerNames := make([]string, 0, len(state.Providers))
@@ -97,27 +96,22 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 		latencyStr := formatDuration(p.Latency)
 		blockStr := fmt.Sprintf("#%d", p.BlockHeight)
 
-		fmt.Printf("%s  %-12s %s  %8s  %s%s\n",
-			cyan("│"),
+		fmt.Printf("  %-12s %s  %8s  %s\n",
 			p.Name,
 			statusIcon,
 			latencyStr,
-			blockStr,
-			padToWidth(50-len(p.Name)-len(latencyStr)-len(blockStr), cyan("│")))
+			blockStr)
 	}
 
-	fmt.Println(cyan("│") + "                                                                   " + cyan("│"))
+	fmt.Println()
 
 	// Consistency status
 	if consistency != nil {
 		if consistency.HeightConsensus && consistency.HashConsensus {
-			fmt.Printf("%s  Block Sync: %s%s\n",
-				cyan("│"),
-				green("✓ All providers in sync"),
-				padToWidth(41, cyan("│")))
+			fmt.Printf("  Block Sync: %s\n",
+				green("✓ All providers in sync"))
 		} else if !consistency.HashConsensus && len(consistency.HashGroups) > 1 {
-			fmt.Printf("%s  Block Sync: %s at #%d\n",
-				cyan("│"),
+			fmt.Printf("  Block Sync: %s at #%d\n",
 				yellow("⚠ Hash mismatch"),
 				consistency.ReferenceHeight)
 
@@ -128,7 +122,7 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 				if i > 0 {
 					suffix = " ← minority"
 				}
-				fmt.Printf("%s    %s: %s%s\n", cyan("│"), truncHash, providers, suffix)
+				fmt.Printf("    %s: %s%s\n", truncHash, providers, suffix)
 			}
 		} else {
 			var issues string
@@ -141,20 +135,18 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 				}
 				issues += "⚠ hash mismatch"
 			}
-			fmt.Printf("%s  Block Sync: %s%s\n",
-				cyan("│"),
-				yellow(issues),
-				padToWidth(50-len(issues), cyan("│")))
+			fmt.Printf("  Block Sync: %s\n",
+				yellow(issues))
 		}
 	}
 
-	fmt.Println(cyan("│") + "                                                                   " + cyan("│"))
+	fmt.Println()
 
 	// Recent events
-	fmt.Printf("%s  %s%s\n", cyan("│"), bold("Recent Events:"), padToWidth(50, cyan("│")))
+	fmt.Printf("  %s\n", bold("Recent Events:"))
 
 	if len(state.Events) == 0 {
-		fmt.Printf("%s    %s%s\n", cyan("│"), "(no events)", padToWidth(52, cyan("│")))
+		fmt.Printf("    %s\n", "(no events)")
 	} else {
 		for i, event := range state.Events {
 			if i >= 5 {
@@ -176,11 +168,11 @@ func RenderWatch(state *WatchState, consistency *metrics.ConsistencyReport) {
 				coloredLine = line
 			}
 
-			fmt.Printf("%s    %s%s\n", cyan("│"), coloredLine, padToWidth(60-len(line), cyan("│")))
+			fmt.Printf("    %s\n", coloredLine)
 		}
 	}
 
-	fmt.Println(cyan("│") + "                                                                   " + cyan("│"))
+	fmt.Println()
 	fmt.Println(cyan("╰───────────────────────────────────────────────────────────────────╯"))
 	fmt.Println()
 	fmt.Println("Press Ctrl+C to exit")

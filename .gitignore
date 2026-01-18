@@ -1,5 +1,6 @@
 # Binaries
 /monitor
+bin/
 *.exe
 *.exe~
 *.dll
@@ -20,6 +21,7 @@ go.work
 .vscode/
 *.swp
 *.swo
+.cursorrules
 
 # OS
 .DS_Store
@@ -30,6 +32,7 @@ config/providers.local.yaml
 config/providers.yaml
 
 # Reports
+reports/
 *.json
 !package.json
 

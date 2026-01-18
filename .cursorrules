@@ -33,25 +33,36 @@ This is a portfolio project demonstrating operational thinking, Go proficiency, 
 ```
 cmd/
 └── monitor/
-    └── main.go # Entry point, Cobra CLI setup
+    ├── main.go      # Entry point, minimal Cobra CLI setup
+    ├── snapshot.go  # Snapshot command and execution logic
+    ├── watch.go     # Watch command and live monitoring logic
+    ├── blocks.go    # Blocks command, execution, and block arg parsing
+    ├── txs.go       # Transactions command and execution logic
+    ├── call.go      # Contract call command and execution logic
+    ├── status.go    # Status command and health check logic
+    └── helpers.go   # Shared utilities (config loading, client building, provider selection, consistency checks)
 
 internal/
 ├── rpc/
-│   ├── client.go # JSON-RPC client with retry, backoff, circuit breaker
-│   ├── methods.go # Ethereum RPC method wrappers
-│   └── abi.go # ABI encoding for contract calls (Phase 4)
+│   ├── client.go    # JSON-RPC client with retry, backoff, circuit breaker
+│   ├── methods.go   # Ethereum RPC method wrappers
+│   ├── abi.go       # ABI encoding/decoding for contract calls
+│   └── abi_test.go  # ABI encoding tests
 ├── metrics/
-│   ├── collector.go # Statistics collection
-│   └── consistency.go # Cross-provider consistency checking
+│   ├── collector.go      # Statistics collection and aggregation
+│   ├── consistency.go   # Cross-provider consistency checking
+│   └── consistency_test.go # Consistency checker tests
 ├── output/
-│   ├── terminal.go # Colored terminal rendering
-│   ├── json.go # JSON output formatting
-│   ├── blocks.go # Block + transaction rendering (Phase 2–3)
-│   └── watch.go # Watch mode display
+│   ├── terminal.go  # Colored terminal rendering
+│   ├── json.go      # JSON output formatting
+│   ├── blocks.go    # Block and transaction rendering
+│   ├── call.go      # Contract call result rendering
+│   ├── status.go    # Provider status/ranking rendering
+│   └── watch.go     # Watch mode live display
 ├── provider/
-│   └── selector.go # Provider ranking and selection (Phase 5)
+│   └── selector.go  # Provider ranking and selection logic
 └── config/
-    └── config.go # YAML configuration loading
+    └── config.go    # YAML configuration loading and validation
 ```
 
 ## Commands
@@ -59,10 +70,10 @@ internal/
 |---------|--------|-------------|
 | `monitor snapshot` | DONE | Detailed diagnostic report |
 | `monitor watch` | DONE | Live monitoring |
-| `monitor blocks` | Phase 2 | Fetch block details |
-| `monitor txs` | Phase 3 | List transactions in a block |
-| `monitor call` | Phase 4 | Query contract state |
-| `monitor status` | Phase 5 | Provider health and ranking |
+| `monitor blocks` | DONE | Fetch block details |
+| `monitor txs` | DONE | List transactions in a block |
+| `monitor call` | DONE | Query contract state |
+| `monitor status` | DONE | Provider health and ranking |
 
 ## Development Principles
 

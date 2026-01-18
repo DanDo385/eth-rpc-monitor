@@ -1,367 +1,274 @@
 # Ethereum RPC Infrastructure Monitor
 
-A command-line tool for monitoring Ethereum RPC endpoint reliability, latency distribution, and cross-provider data consistency. Designed for institutional operations teams who need visibility into their infrastructure dependencies.
+A command-line tool for monitoring **Ethereum RPC endpoint reliability, performance, and data correctness**.
+
+This tool is designed primarily for **institutional operations, infrastructure, and risk teams** who rely on Ethereum data and need visibility into the health of their upstream dependencies.
+
+> **Note (plain-language):**
+> Ethereum applications do not talk to the blockchain directly.
+> They talk to *RPC providers* (Alchemy, Infura, Blockdaemon, self-hosted nodes).
+> If those providers are slow, stale, or inconsistent, your application inherits that risk.
+
+At a high level, this tool helps answer one critical operational question:
+
+> **"Can we trust the Ethereum data our systems are using right now?"**
+
+---
 
 ## Why This Exists
 
-Institutions running operations on Ethereum—custody, staking, trading, settlement—depend on reliable RPC infrastructure. Whether self-hosted nodes or managed providers, the operational concerns are identical:
+Any system operating on Ethereum—custody platforms, trading systems, staking infrastructure, settlement pipelines, analytics, or compliance tooling—depends on **RPC providers** to answer questions like:
 
-- **What happens when a provider goes down?**
-- **How do we detect stale or inconsistent data?**
-- **Which providers should we prioritize for failover?**
+* What is the latest block height?
+* Has this transaction been included?
+* What is the balance of this address?
+* What transactions occurred in a given block?
 
-This tool demonstrates the monitoring patterns required for production-grade Ethereum infrastructure. It is being developed in iterative phases to gradually expand functionality while maintaining clarity. Each phase adds features addressing specific operational needs: real-time monitoring, on-demand data queries, intelligent provider selection, and smart contract state verification.
+That dependency introduces **non-obvious failure modes**.
 
-Future enhancements will include automated provider recommendations based on live performance metrics and expanded consistency verification across additional RPC methods.
+> **Operational scenario:**
+> A provider is online, responding quickly, and returning valid JSON — but it is several blocks behind the network.
+> From the application's perspective, everything "looks fine," yet users see missing deposits or delayed confirmations.
+
+This tool exists to **detect those conditions before they cause user-facing or financial impact**.
+
+> **Traditional finance analogy:**
+> This is the blockchain equivalent of monitoring market data feeds, trade confirmations, and settlement systems — correctness matters more than speed.
+
+---
 
 ## Features
 
 ### Snapshot Mode
-Generate a detailed one-time diagnostic report across all configured providers:
 
-- **Latency percentiles** (p50, p95, p99, max) with comprehensive statistical analysis
-- **Success rates and error classification** (timeouts, rate limits, server errors, parse errors)
-- **Cross-provider block height consistency** with variance detection and drift analysis
-- **Block hash verification** at a common reference height to detect chain reorgs and stale caches
-- **Operational assessment** with automated provider ranking and failover recommendations
+Generate a **one-time diagnostic report** across all configured providers.
 
-The snapshot command collects configurable sample sizes (default: 30) with adjustable intervals between requests, providing statistically significant performance metrics for capacity planning and SLA validation.
+Snapshot mode is intended for:
 
-### Watch Mode
+* Provider evaluation
+* SLA validation
+* Capacity planning
+* Incident post-mortems
 
-Real-time monitoring with live updates and incident tracking:
+It reports:
 
-- **Provider status at a glance** (UP/SLOW/DEGRADED/DOWN) with visual indicators
-- **Current latency and block height** for each provider, updated at configurable intervals
-- **Recent incident log** capturing status changes, latency spikes, and provider failures
-- **Immediate visibility** when infrastructure degrades, enabling rapid incident response
-- **Block hash consensus tracking** performed every 3 refresh cycles to balance thoroughness with performance
+* **Latency percentiles** (p50, p95, p99, max) with comprehensive statistical analysis
+* **Success rates and error classification** (timeouts, rate limits, server errors, parse errors)
+* **Cross-provider block height consistency** with variance detection and drift analysis
+* **Block hash verification** at a common reference height to detect chain reorgs and stale caches
+* **Operational assessment** with automated provider ranking and failover recommendations
 
-Watch mode implements automatic refresh (default: 5 seconds) and maintains a rolling incident history to help operators identify patterns in provider behavior.
+> **Note (plain-language): Block height**
+> Block height (also called block number) is Ethereum's "ledger page number."
+> If providers disagree here, one of them is behind.
 
-### On-Demand Queries
+> **Why this matters:**
+> Using a lagging provider can delay deposits, misreport balances, or cause reconciliation failures.
 
-In addition to continuous monitoring, the tool provides commands for one-off queries and data inspection:
-
-#### Block Data Retrieval (`blocks` command)
-Fetch and display the details of a specific block by number, hex, or tag (`latest`). Returns comprehensive block metadata including:
-- Block number, hash, and parent hash
-- Timestamp (both Unix and human-readable)
-- Gas used and gas limit with utilization percentage
-- Base fee per gas (post-EIP-1559 blocks)
-- Transaction count
-
-Useful for quick inspection of block metadata across providers and verifying data consistency. Supports `--raw` flag to display the full JSON-RPC response for detailed analysis.
-
-#### Transaction Listing (`txs` command)
-Display the list of transactions within a given block. Shows transaction details including:
-- Transaction hash
-- From and to addresses
-- Value transferred (in ETH)
-- Gas limit and gas price
-- Transaction index and nonce
-- Calldata summary (truncated for readability)
-
-Allows drilling into block contents to verify all providers return the same transactions, detecting any discrepancies in transaction data. Supports `--limit` flag to control output size and `--raw` flag for full JSON transaction objects.
-
-#### Smart Contract Call (`call` command)
-Query on-chain data via `eth_call` to read smart contract state without sending transactions. Currently implements ERC-20 token balance queries with automatic ABI encoding/decoding:
-
-**USDC Balance Query:**
-```bash
-monitor call usdc balance <address>
-```
-
-This executes a `balanceOf(address)` call to the USDC contract (0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48) on mainnet, demonstrating:
-- Keccak-256 function selector computation (`balanceOf(address)` → `0x70a08231`)
-- ABI parameter encoding (address → 32-byte padded hex)
-- Return value decoding (uint256 → human-readable balance with decimals)
-- Token amount formatting with thousand separators and proper decimal placement
-
-The `--raw` flag displays the raw calldata and hex-encoded return value for educational purposes, showing exactly what gets transmitted over the wire.
-
-#### Status Check (`status` command)
-Get an instant status summary of all configured providers with automatic health-based ranking. Performs a quick health check (default: 5 samples per provider) and returns:
-
-**Per-Provider Metrics:**
-- Current status (UP, SLOW, DEGRADED, DOWN) based on success rate and latency thresholds
-- Success rate percentage over the sample window
-- Average and P95 latency measurements
-- Latest block height with delta from network maximum
-- Composite health score (0-1) computed from weighted metrics
-
-**Scoring Algorithm:**
-The composite score combines three weighted factors:
-- **Success rate (50% weight):** Reliability is paramount for production systems
-- **Latency (30% weight):** P95 latency normalized against 1000ms threshold
-- **Freshness (20% weight):** Block height delta normalized against 10-block window
-
-**Ranking and Recommendations:**
-Providers are ranked by composite score, with exclusion logic for degraded endpoints:
-- Success rate below 80% → excluded with reason
-- More than 5 blocks behind → excluded with reason
-- Automatic failover priority recommendation (e.g., "Alchemy → Infura → LlamaNodes")
-
-**Operational Assessment:**
-The status output includes human-readable assessment of infrastructure health, flagging providers unsuitable for production use and highlighting those acceptable for fallback scenarios.
-
-This command is particularly valuable for:
-- **Capacity planning:** Understanding which providers can handle production traffic
-- **Incident response:** Quickly identifying degraded endpoints during outages
-- **Failover configuration:** Determining optimal provider ordering based on live performance
-- **Educational exploration:** Seeing how different provider tiers (public/enterprise/self-hosted) perform in practice
-
-### Smart Provider Selection
-
-All on-demand query commands (`blocks`, `txs`, `call`) implement automatic provider selection when no `--provider` flag is specified. The selection algorithm:
-
-1. Performs a quick health check (3 samples per provider) with 10-second timeout
-2. Calculates composite scores based on success rate, latency, and block height freshness
-3. Excludes providers with <80% success rate or >5 blocks behind
-4. Selects the highest-scoring provider and reports the auto-selection to the user
-
-This ensures queries are routed to the most reliable, performant provider available at query time, automatically adapting to changing network conditions.
-
-**Fallback Behavior:**
-If health check fails or all providers are degraded, the system falls back to the first configured provider with a warning message, ensuring operations continue even during partial outages.
-
-## Installation
-
-```bash
-git clone https://github.com/dmagro/eth-rpc-monitor
-cd eth-rpc-monitor
-go build -o monitor ./cmd/monitor
-```
-
-**Requirements:**
-- Go 1.21+ (tested with Go 1.24)
-- Network access to configured RPC endpoints
-
-**Build Output:**
-The compiled binary (~12MB) is a self-contained executable with no runtime dependencies.
-
-## Usage
-
-### Snapshot Report
-```bash
-# Run with default settings (30 samples per provider, 100ms interval)
-./monitor snapshot
-
-# Custom sample count and interval for high-resolution profiling
-./monitor snapshot --samples 50 --interval 100
-
-# JSON output for automation and integration with monitoring systems
-./monitor snapshot --format json > report.json
-```
+Snapshot mode collects multiple samples (default: 30) with configurable intervals to produce **statistically meaningful results**, rather than relying on a single request.
 
 **Sample Configuration Trade-offs:**
 - **Fewer samples (10-20):** Fast execution, suitable for quick checks, higher variance
 - **Default (30 samples):** Balanced statistical significance and execution time (~3 seconds)
 - **More samples (50-100):** Higher confidence in percentile calculations, longer execution (~5-10 seconds)
 
-**Interval Tuning:**
-- Lower intervals (50ms): Faster overall execution but may trigger rate limits on public endpoints
-- Higher intervals (200-500ms): More suitable for public tier endpoints with rate limits
-- The interval provides a simple throttle mechanism to prevent overwhelming providers
+---
 
-**JSON Output Structure:**
-The JSON format provides machine-readable data suitable for:
-- Integration with monitoring platforms (Prometheus, Datadog, Grafana)
-- Automated alerting based on success rate or latency thresholds
-- Historical trending and SLA compliance reporting
-- Custom analysis and visualization pipelines
+### Watch Mode
 
-### Live Monitoring
-```bash
-# Default 5-second refresh interval
-./monitor watch
+Real-time monitoring with live updates and incident tracking.
 
-# Faster refresh (e.g. 2s) for active incident response
-./monitor watch --refresh 2s
+Watch mode provides:
 
-# Slower refresh (e.g. 30s) for low-priority monitoring or rate-limited endpoints
-./monitor watch --refresh 30s
-```
+* **Provider status at a glance** (UP / SLOW / DEGRADED / DOWN) with visual indicators
+* **Live latency and block height** for each provider, updated at configurable intervals
+* **Rolling incident log** capturing status changes, latency spikes, and provider failures
+* **Block hash consensus tracking** performed every 3 refresh cycles to balance thoroughness with performance
+* **Immediate visibility** when infrastructure degrades, enabling rapid incident response
 
-**Watch Mode Implementation Details:**
-- Uses terminal clearing and redrawing for smooth live updates without scrolling
-- Maintains a rolling incident log (last 10 events) with timestamps and severity
-- Tracks status transitions (UP→SLOW, SLOW→DOWN, etc.) to identify flapping
-- Performs block hash consensus checks every 3 cycles (15 seconds at default refresh) to detect reorgs without excessive RPC calls
-- Supports graceful shutdown via Ctrl+C, preserving final state in terminal
+> **Note (plain-language): Hash consensus**
+> Providers can report the same block number but disagree on the block's contents.
+> Hash consensus confirms they are seeing the *same version* of the chain.
 
-**Refresh Interval Considerations:**
-- **Fast (1-2s):** High visibility during incidents, increased RPC load and potential rate limiting
-- **Medium (5-10s):** Balanced for operational monitoring, default recommended setting
-- **Slow (30s+):** Suitable for long-term observation or public endpoint constraints
+> **Operational scenario:**
+> Three providers agree on a block hash. One does not.
+> That outlier is unsafe to use until it realigns with the majority — this could indicate a stale cache or an ongoing chain reorganization.
 
-### Block Query
-```bash
-# Fetch details for block 17000000 (using auto-selected provider)
-./monitor blocks 17000000
+Watch mode implements automatic refresh (default: 5 seconds) and maintains a rolling incident history to help operators identify patterns in provider behavior.
 
-# Fetch latest block
-./monitor blocks latest
+---
 
-# Use hexadecimal block number (alternative notation)
-./monitor blocks 0x1036640
+## On-Demand Queries
 
-# Specify a provider explicitly (bypasses auto-selection)
-./monitor blocks 17000000 --provider alchemy
+In addition to continuous monitoring, the tool provides **explicit inspection commands** for real-time investigation.
 
-# Get output in JSON format (useful for parsing or feeding to other tools)
-./monitor blocks 17000000 --format json
+---
 
-# Show raw JSON-RPC response (educational: see exact RPC wire format)
-./monitor blocks latest --raw
-```
+### Block Data Retrieval (`blocks` command)
 
-**Terminal Mode Output:**
-Displays block metadata in a human-readable format with:
-- Block identifier and confirmation status
-- Timestamp in both UTC and relative format (e.g., "2 days ago")
-- Gas metrics with utilization percentage bar
-- Base fee in both Wei and Gwei for post-London blocks
-- Transaction count
-- Provider used and query latency
+Fetch details of a block by number, hex value, or tag (`latest`).
 
-**JSON Mode Output:**
-Returns structured data including all terminal fields plus access to nested block properties for programmatic consumption.
-
-**Raw Mode:**
-Shows the complete JSON-RPC response exactly as returned by the provider, including all fields. Useful for:
-- Understanding the full RPC data structure
-- Verifying provider-specific extensions or non-standard fields
-- Educational purposes (learning Ethereum RPC protocol)
-- Debugging data parsing issues
-
-### Transactions in a Block
-```bash
-# List all transactions in block 17000000 (using auto-selected provider)
-./monitor txs 17000000
-
-# Limit output to first 10 transactions (useful for large blocks)
-./monitor txs 17000000 --limit 10
-
-# Show all transactions (0 = unlimited)
-./monitor txs 17000000 --limit 0
-
-# Use specific provider
-./monitor txs 17000000 --provider infura
-
-# JSON output with full transaction objects
-./monitor txs 17000000 --format json
-
-# Raw mode: display complete transaction array as returned by RPC
-./monitor txs 17000000 --raw
-```
-
-**Terminal Mode Display:**
-For each transaction, shows:
-- Transaction hash (clickable in most terminals when formatted as `0x...`)
-- From → To addresses (with special notation for contract creation)
-- Value transferred in ETH with full decimal precision
-- Gas limit allocated
-- Gas price (legacy) or max fee (EIP-1559)
-- Calldata size and preview (first 32 bytes)
-
-**Limit Parameter Behavior:**
-- Default limit (25): Shows first 25 transactions with summary of total count
-- Custom limit: User-specified count for exploring large blocks incrementally
-- Zero limit: Displays all transactions regardless of count (use with caution on large blocks)
-
-**Use Cases:**
-- Verifying transaction inclusion across providers (consistency check)
-- Investigating block contents during incident analysis
-- Comparing transaction data between providers to detect discrepancies
-- Educational exploration of transaction structures and patterns
-
-### Smart Contract Call (Token Balance)
-```bash
-# Query USDC balance for address 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-
-# Use specific provider
-./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --provider alchemy
-
-# JSON output (structured data)
-./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --format json
-
-# Raw mode: show calldata encoding and hex-encoded return value
-./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 --raw
-```
-
-**Implementation Details:**
-
-The `call` command demonstrates production-grade ABI encoding and decoding:
-
-**Function Selector Computation:**
-```
-balanceOf(address) → Keccak256 hash → First 4 bytes → 0x70a08231
-```
-
-**Address Parameter Encoding:**
-```
-Input: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-Output: 0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045
-        (left-padded to 32 bytes)
-```
-
-**Complete Calldata:**
-```
-0x70a08231000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045
-  ^^^^^^^^ function selector
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ padded address parameter
-```
-
-**Return Value Decoding:**
-```
-RPC returns: 0x0000000000000000000000000000000000000000000000000000000005f5e100 (hex)
-Decoded: 100000000 (uint256)
-Formatted: 100.000000 USDC (accounting for 6 decimals)
-```
-
-**Terminal Output:**
 Displays:
-- Contract being queried (address and symbol)
-- Method called (`balanceOf`)
-- Target address being queried
-- Formatted balance with decimals and thousand separators
-- Provider used and query latency
-- Optional: Raw calldata and response (with `--raw` flag)
 
-**Educational Value:**
-This command serves as a reference implementation for:
-- Keccak-256 hashing for function selectors (using golang.org/x/crypto/sha3)
-- ABI encoding rules (fixed-size types, left-padding for addresses)
-- Big integer arithmetic for token amounts (using math/big)
-- Decimal formatting with thousand separators
-- Proper handling of different token decimal places (6 for USDC, 18 for WETH, etc.)
+* **Block number and hash**
+* **Parent hash** (links to previous block)
+* **Timestamp** (Unix and human-readable)
+* **Gas used and gas limit with utilization percentage**
+* **Base fee per gas** (post-EIP-1559 blocks)
+* **Transaction count**
 
-**Extensibility:**
-The ABI encoding logic in `internal/rpc/abi.go` is designed for easy extension to other ERC-20 tokens or arbitrary contract calls. Additional token contracts can be added by defining contract address and decimal constants.
+> **Note (plain-language): Parent hash**
+> Each block references the hash of the previous block.
+> This links blocks into a continuous chain.
 
-### Status Check
+> **Why this matters:**
+> If the parent hash doesn't match expected values, the chain has forked or reorganized.
+
+> **Note (plain-language): Gas utilization**
+> Gas utilization shows how full a block was (0-100%).
+
+> **Operational scenario:**
+> Multiple consecutive blocks at 95–100% utilization explain slow confirmations and rising fees — not an application bug.
+> This is network congestion, not a provider issue.
+
+The `--raw` flag displays the full JSON-RPC response for debugging or audit purposes.
+
+**Example usage:**
 ```bash
-# Get instant status summary of all configured providers
-./monitor status
+# Fetch latest block using auto-selected provider
+./bin/monitor blocks latest
 
-# Custom sample count for more precise scoring
-./monitor status --samples 10
+# Fetch specific block with explicit provider
+./monitor blocks 19000000 --provider alchemy
 
-# JSON output for integration with monitoring systems
-./monitor status --format json
+# Show raw JSON-RPC response for audit
+./bin/monitor blocks latest --raw
 ```
 
-**Terminal Mode Output:**
+---
 
+### Transaction Listing (`txs` command)
+
+Display transactions within a block.
+
+Each transaction includes:
+
+* **Transaction hash**
+* **From and to addresses**
+* **Value transferred (ETH)**
+* **Gas limit and gas price / fee**
+* **Transaction index and nonce**
+* **Calldata summary** (truncated for readability)
+
+> **Note (plain-language): Calldata**
+> Calldata encodes *what function was called and with what inputs*.
+> For simple ETH transfers, calldata is empty.
+> For contract interactions, it contains the encoded function call and parameters.
+
+> **Operational scenario:**
+> Two transactions send 0 ETH.
+> One approves a token transfer; the other executes a trade.
+> Without calldata inspection, they look identical — but their economic impact is vastly different.
+
+**Example usage:**
+```bash
+# List transactions in block (default: first 25)
+./bin/monitor txs 19000000
+
+# Show all transactions
+./bin/monitor txs 19000000 --limit 0
+
+# Compare transaction lists across providers
+./bin/monitor txs 19000000 --provider alchemy
+./bin/monitor txs 19000000 --provider infura
 ```
-╭─────────────────────────────────────────────────────────────────╮
-│              Provider Health Status Report                      │
-│                   2025-01-14 14:32:01 UTC                       │
-│                      Sample Size: 5                             │
-╰─────────────────────────────────────────────────────────────────╯
 
+---
+
+### Smart Contract Call (`call` command)
+
+Query on-chain data using `eth_call` (read-only smart contract execution).
+
+**Example: USDC Balance Query**
+```bash
+./bin/monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+> **Note (plain-language): `eth_call`**
+> `eth_call` simulates a contract function without creating a transaction or spending gas.
+> It returns the result immediately — no waiting for block inclusion.
+
+> **Why this matters:**
+> Custody platforms rely on `eth_call` for constant balance verification.
+> Trading systems use it to check token allowances before executing swaps.
+> Any error here means incorrect data in production systems.
+
+**What this demonstrates:**
+
+* **Function selector computation**
+  `balanceOf(address)` → Keccak-256 hash → First 4 bytes → `0x70a08231`
+
+* **ABI parameter encoding**
+  Address `0xd8dA...6045` → Left-padded to 32 bytes → `0x000...d8da...6045`
+
+* **Return value decoding**
+  Hex result `0x05f5e100` → Decimal 100000000 → 100.000000 USDC (6 decimals)
+
+* **Token decimal handling**
+  Raw integers → Human-readable amounts with proper decimal placement
+
+> **Note (plain-language): Token decimals**
+> Tokens store integers, not human-readable balances.
+>
+> * USDC: 6 decimals (1000000 = 1.000000 USDC)
+> * WETH/USDT: 18 decimals (1000000000000000000 = 1.000000000000000000 ETH)
+
+> **Operational scenario:**
+> A system forgets to account for decimals.
+> A 100 USDC balance (stored as 100000000) appears as "100000000.00 USDC" in reports.
+> This triggers compliance alerts, audit failures, and customer service escalations.
+
+The `--raw` flag shows exact calldata and hex-encoded responses for educational or debugging purposes.
+
+---
+
+### Status Check (`status` command)
+
+Instant health summary and provider ranking.
+
+Evaluates each provider on:
+
+* **Success rate** (% of requests that succeed)
+* **Latency** (P95, milliseconds)
+* **Freshness** (blocks behind network maximum)
+
+Outputs:
+
+* **Health rankings** sorted by composite score
+* **Exclusions** (providers unsuitable for production use)
+* **Recommended provider order** for failover configuration
+
+> **Operational scenario:**
+> A fallback provider is responsive but 8 blocks behind (96 seconds at 12s/block).
+> Status flags it as unsafe before users report "missing" deposits.
+> Operations can proactively exclude it from rotation until it catches up.
+
+**Composite Score Formula:**
+```
+Score = (SuccessRate/100 * 0.5) + ((1 - P95ms/1000) * 0.3) + ((1 - BlockDelta/10) * 0.2)
+```
+
+This weighted formula prioritizes:
+- **Reliability (50%):** Can we trust it to respond?
+- **Speed (30%):** Will it respond quickly enough?
+- **Freshness (20%):** Is it seeing current data?
+
+**Exclusion criteria:**
+- Success rate <80%: Too unreliable for production traffic
+- Block delta >5: Serving stale data (>60 seconds behind)
+
+**Example output:**
+```
 Provider Rankings
 ┌──────────────┬─────────┬─────────┬────────┬─────────┬───────┬────────┐
 │ Provider     │ Status  │ Success │ Avg    │ P95     │ Block │ Score  │
@@ -372,78 +279,102 @@ Provider Rankings
 │ PublicNode   │ ✗ DOWN  │ 40.0%   │ —      │ —       │ -8    │ 0.124  │
 └──────────────┴─────────┴─────────┴────────┴─────────┴───────┴────────┘
 
-Operational Assessment
-  ┌─────────────────────────────────────────────────────────────────┐
-  │ ✗ PublicNode unsuitable for production use                      │
-  │   Reason: success rate 40.0% below threshold                    │
-  │                                                                 │
-  │ ⚠ LlamaNodes acceptable for fallback only                       │
-  │   Status: SLOW (P95 latency 512ms exceeds 500ms threshold)      │
-  │                                                                 │
-  │ ✓ Alchemy, Infura performing within expected parameters         │
-  │                                                                 │
-  │ Recommended priority: Alchemy → Infura → LlamaNodes             │
-  └─────────────────────────────────────────────────────────────────┘
+Recommended priority: Alchemy → Infura → LlamaNodes
 ```
 
-**JSON Output Structure:**
-```json
-{
-  "timestamp": "2025-01-14T14:32:01Z",
-  "providers": [
-    {
-      "name": "Alchemy",
-      "status": "UP",
-      "successRate": 100.0,
-      "avgLatency": "145ms",
-      "p95Latency": "189ms",
-      "blockHeight": 19234567,
-      "blockDelta": 0,
-      "score": 0.912,
-      "excluded": false,
-      "excludeReason": ""
-    }
-  ],
-  "recommendations": ["Alchemy", "Infura", "LlamaNodes"],
-  "excluded": ["PublicNode"]
-}
-```
+---
 
-**Status Thresholds:**
+## Smart Provider Selection
 
-The status command applies production-grade health classification:
+When no `--provider` flag is specified, the tool automatically selects the best available provider:
 
-| Status    | Success Rate | P95 Latency | Description |
-|-----------|-------------|-------------|-------------|
-| **UP**    | ≥90%        | ≤500ms      | Optimal performance, suitable for primary use |
-| **SLOW**  | ≥90%        | >500ms      | Reliable but slow, acceptable for fallback |
-| **DEGRADED** | 50-90%   | Any         | Partial failures, use with caution |
-| **DOWN**  | <50%        | Any         | Majority failures, should not be used |
+1. **Quick health check** (3 samples per provider, 10-second timeout)
+2. **Score calculation** based on success rate, latency, and freshness
+3. **Exclusion logic** removes unsafe providers
+4. **Best selection** uses highest-scoring available provider
 
-**Exclusion Logic:**
-- Success rate <80%: Excluded from recommendations with specific reason
-- Block delta >5: Excluded due to stale data (>60 seconds behind at ~12s block time)
-- All providers degraded: Recommendations include least-bad option with warning
+> **Note (plain-language):**
+> Partial data is better than no data during incidents — but only if it's clearly labeled as degraded.
 
-**Composite Score Formula:**
-```
-Score = (SuccessRate/100 * 0.5) + ((1 - P95ms/1000) * 0.3) + ((1 - BlockDelta/10) * 0.2)
-```
+**Fallback behavior:**
+If all providers are degraded or health check fails, the system falls back to the first configured provider with a warning, ensuring operations continue even during partial outages.
 
-This weighted formula prioritizes reliability (50%) over speed (30%) and freshness (20%), reflecting institutional operational priorities where correctness trumps performance.
+---
 
-### Configuration
+## Installation
 
 ```bash
-# Use custom provider config file (defaults to config/providers.yaml)
-./monitor snapshot --config /path/to/my_providers.yaml
-
-# All commands support the --config flag
-./monitor watch --config /path/to/custom_config.yaml
-./monitor status --config /path/to/custom_config.yaml
+git clone https://github.com/dmagro/eth-rpc-monitor
+cd eth-rpc-monitor
+go build -o bin/monitor ./cmd/monitor
 ```
 
-## Provider Configuration
+**Requirements:**
+- Go 1.21+ (tested with Go 1.24)
+- Network access to configured RPC endpoints
+
+**Build Output:**
+- The compiled binary (~12MB) is placed in `bin/monitor` and is a self-contained executable with no runtime dependencies
+- Generated reports are saved to `reports/` directory (gitignored)
+- Both `bin/` and `reports/` directories are gitignored and excluded from version control
+
+---
+
+## Usage
+
+### Snapshot Report
+
+```bash
+# Run with default settings (30 samples per provider, 100ms interval)
+./bin/monitor snapshot
+
+# Custom sample count and interval for high-resolution profiling
+./bin/monitor snapshot --samples 50 --interval 100
+
+# JSON output for automation and integration with monitoring systems
+./bin/monitor snapshot --format json
+
+# Save JSON report to timestamped file in reports/ directory
+./bin/monitor snapshot --format json --output reports/
+
+# Save JSON report to specific file
+./bin/monitor snapshot --format json --output my-report.json
+```
+
+**Interval tuning:**
+- Lower intervals (50ms): Faster execution but may trigger rate limits on public endpoints
+- Higher intervals (200-500ms): More suitable for public tier endpoints with rate limits
+- The interval provides a simple throttle mechanism to prevent overwhelming providers
+
+**JSON output use cases:**
+- Integration with monitoring platforms (Prometheus, Datadog, Grafana)
+- Automated alerting based on success rate or latency thresholds
+- Historical trending and SLA compliance reporting
+
+---
+
+### Live Monitoring
+
+```bash
+# Default 5-second refresh interval
+./monitor watch
+
+# Faster refresh (2s) for active incident response
+./monitor watch --refresh 2s
+
+# Slower refresh (30s) for low-priority monitoring or rate-limited endpoints
+./monitor watch --refresh 30s
+```
+
+**Watch mode implementation details:**
+- Uses terminal clearing and redrawing for smooth live updates without scrolling
+- Maintains a rolling incident log (last 10 events) with timestamps and severity
+- Tracks status transitions (UP→SLOW, SLOW→DOWN, etc.) to identify flapping
+- Supports graceful shutdown via Ctrl+C, preserving final state in terminal
+
+---
+
+### Provider Configuration
 
 Edit `config/providers.yaml` to configure your endpoints:
 
@@ -452,153 +383,50 @@ defaults:
   timeout: 10s              # Per-request timeout
   max_retries: 3            # Maximum retry attempts
   backoff_initial: 100ms    # Initial backoff duration
-  backoff_max: 5s           # Maximum backoff duration (exponential backoff caps here)
+  backoff_max: 5s           # Maximum backoff duration
 
 providers:
   - name: alchemy
     url: https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
     type: enterprise
-    # Optional: override default timeout for this provider
-    # timeout: 15s
 
   - name: local-geth
     url: http://localhost:8545
     type: self_hosted
-    timeout: 5s  # Lower timeout for local nodes (no network latency)
+    timeout: 5s  # Lower timeout for local nodes
 
   - name: infura
     url: https://mainnet.infura.io/v3/YOUR_KEY
     type: public
 ```
 
-**Provider Types:**
+**Configuration best practices:**
 
-| Type | Description | Expected Performance | Typical Use Case |
-|------|-------------|---------------------|------------------|
-| `public` | Free tier endpoints | Rate limited, no SLA, variable latency | Development, testing, non-critical fallback |
-| `enterprise` | Paid managed services | SLA-backed, dedicated capacity, optimized routing | Production primary endpoints |
-| `self_hosted` | Self-operated nodes | Full control, no rate limits, network-dependent | Sovereignty requirements, high-volume operations |
-
-**Configuration Best Practices:**
-
-1. **Timeout Tuning:**
+1. **Timeout tuning:**
    - Local nodes: 3-5s (fast, predictable network)
    - Managed providers: 10-15s (accounts for network variability)
    - Public endpoints: 10-20s (may experience congestion)
 
-2. **Retry Strategy:**
+2. **Retry strategy:**
    - max_retries: 3 is recommended (balances resilience with responsiveness)
    - Higher values (5+) may mask fundamental provider issues
-   - Lower values (1-2) provide faster failure detection but less resilience to transient errors
+   - Lower values (1-2) provide faster failure detection but less resilience
 
-3. **Backoff Configuration:**
+3. **Backoff configuration:**
    - Initial backoff (100ms): First retry happens quickly for transient errors
    - Max backoff (5s): Prevents excessive wait times while avoiding thundering herd
    - Exponential progression: 100ms → 200ms → 400ms → 800ms → capped at 5s
-   - Jitter: Random value (0 to backoff/2) added to prevent synchronized retries across multiple clients
+   - Jitter: Random value (0 to backoff/2) added to prevent synchronized retries
 
-**Production Configuration Example:**
+---
 
-For institutional deployments, a typical configuration might include:
-- 2-3 enterprise providers (Alchemy, Infura, Blockdaemon) for primary traffic
-- 1-2 self-hosted nodes for sovereignty and fallback
-- 1 public endpoint for emergency fallback (rate-limited but zero cost)
+## Monitoring & Resilience Patterns
 
-The monitoring tool helps validate SLA compliance and identify optimal provider ordering for your specific workload and geographic location.
+### Exponential Backoff with Jitter
 
-## Architecture
-
-```
-eth-rpc-monitor/
-├── cmd/
-│   └── monitor/
-│       └── main.go              # CLI entry point, command definitions (snapshot, watch, blocks, txs, call, status)
-│                                # Orchestrates data collection, metric calculation, and output rendering
-│
-├── internal/
-│   ├── config/
-│   │   └── config.go            # YAML configuration parsing and validation
-│   │                            # Handles provider definitions, defaults, timeout settings
-│   │
-│   ├── rpc/
-│   │   ├── client.go            # JSON-RPC client with production resilience patterns
-│   │   │                        # - Exponential backoff with jitter (prevents thundering herd)
-│   │   │                        # - Circuit breaker (3 failures → 30s cooldown)
-│   │   │                        # - Automatic retry with configurable max attempts
-│   │   │                        # - Error categorization (timeout, rate limit, server error, parse error)
-│   │   │
-│   │   ├── methods.go           # Ethereum RPC method implementations
-│   │   │                        # - eth_getBlockByNumber (with full transaction support)
-│   │   │                        # - eth_blockNumber
-│   │   │                        # - eth_call (smart contract state queries)
-│   │   │                        # Includes hex parsing, big.Int handling, and response marshaling
-│   │   │
-│   │   └── abi.go              # ABI encoding and decoding utilities
-│   │       └── abi_test.go      # - Keccak-256 function selector computation
-│   │                            # - Address padding and encoding (20 bytes → 32 bytes left-padded)
-│   │                            # - uint256 decoding from hex
-│   │                            # - Token amount formatting with decimals and thousand separators
-│   │                            # - Address validation (length check, hex verification)
-│   │
-│   ├── metrics/
-│   │   ├── collector.go         # Metrics aggregation and statistical analysis
-│   │   │                        # - Latency percentile calculation (p50, p95, p99, max)
-│   │   │                        # - Success rate computation
-│   │   │                        # - Error categorization and counting
-│   │   │                        # - Provider status determination (UP/SLOW/DEGRADED/DOWN)
-│   │   │
-│   │   ├── consistency.go       # Cross-provider consistency verification
-│   │   │   └── consistency_test.go  # - Block height variance detection
-│   │   │                        # - Two-phase hash consensus (compare only at reference height)
-│   │   │                        # - Hash group identification (providers with matching hashes)
-│   │   │                        # - Issue detection and reporting (reorgs, stale caches)
-│   │
-│   ├── provider/
-│   │   └── selector.go          # Smart provider selection and health scoring
-│   │                            # - Quick health check (configurable sample count)
-│   │                            # - Composite score calculation (success 50%, latency 30%, freshness 20%)
-│   │                            # - Exclusion logic (success <80%, blocks behind >5)
-│   │                            # - Automatic ranking and best provider selection
-│   │
-│   └── output/
-│       ├── terminal.go          # Terminal rendering with ANSI colors and tables
-│       │                        # - Snapshot report formatting (provider performance, consistency analysis)
-│       │                        # - Unicode box drawing characters for visual separation
-│       │
-│       ├── watch.go             # Live watch mode rendering
-│       │                        # - Terminal clearing and redrawing for smooth updates
-│       │                        # - Incident log with timestamps and severity
-│       │                        # - Status transition tracking (UP→SLOW→DOWN)
-│       │
-│       ├── blocks.go            # Block data display
-│       │                        # - Human-readable block metadata
-│       │                        # - Gas utilization visualization
-│       │                        # - Timestamp formatting (UTC + relative)
-│       │
-│       ├── call.go              # Smart contract call display
-│       │                        # - Token balance formatting with decimals
-│       │                        # - Calldata and response visualization
-│       │
-│       ├── status.go            # Provider status display
-│       │                        # - Health ranking table
-│       │                        # - Operational assessment with recommendations
-│       │
-│       └── json.go              # JSON output formatting
-│                                # - Structured data for programmatic consumption
-│                                # - Integration with monitoring platforms
-│
-└── config/
-    └── providers.yaml           # Default provider configuration
-                                 # - Example configurations for Alchemy, Infura, LlamaNodes, PublicNode
-                                 # - Commented examples for self-hosted and enterprise setups
-                                 # - Timeout and retry defaults
-```
-
-### Resilience Patterns
-
-The RPC client (`internal/rpc/client.go`) implements production-grade resilience patterns critical for reliable infrastructure monitoring:
-
-#### 1. Exponential Backoff with Jitter
+> **Note (plain-language):**
+> Retrying immediately after a failure can make outages worse.
+> If 100 clients retry at the same instant, the provider gets overwhelmed again.
 
 **Purpose:** Prevent thundering herd when providers recover from outages.
 
@@ -620,7 +448,13 @@ Without jitter, multiple clients retrying simultaneously would create synchroniz
 **Institutional relevance:**
 During provider outages, dozens of monitoring clients may be retrying simultaneously. Jittered backoff prevents overwhelming the provider the moment it comes back online, which could trigger a second failure.
 
-#### 2. Circuit Breaker
+---
+
+### Circuit Breaker
+
+> **Note (plain-language):**
+> Fast failure is better than slow failure.
+> If a provider is clearly down, stop wasting time retrying it.
 
 **Purpose:** Stop hammering dead endpoints, allow graceful degradation.
 
@@ -643,19 +477,17 @@ HALF_OPEN → success → CLOSED | failure → OPEN
 - **Resource conservation:** No wasted retries against confirmed-dead endpoints
 - **Automatic recovery:** Circuit tests provider health after cooldown without manual intervention
 
-**Monitoring integration:**
-The circuit breaker state is exposed via:
-- `IsCircuitOpen()` - Current circuit state
-- `ConsecutiveFailures()` - Failure count toward threshold
-
-This allows external monitoring to track circuit state and alert on frequent circuit breaks indicating provider instability.
-
 **Why 3 failures / 30 seconds:**
 - 3 failures provides confidence the provider is truly down (not a single transient error)
 - 30 seconds allows time for provider-side recovery without excessive wait
 - These values are production-tested defaults but could be made configurable for specific environments
 
-#### 3. Graceful Degradation
+---
+
+### Graceful Degradation
+
+> **Note (plain-language):**
+> The system continues operating with reduced capacity when some providers fail.
 
 **Purpose:** Partial failures don't block healthy providers, system remains operational with reduced capacity.
 
@@ -665,22 +497,22 @@ This allows external monitoring to track circuit state and alert on frequent cir
 - **Best-effort results:** Even if some providers fail, successful responses are collected and reported
 - **Consistency checks:** Work with whatever data is available (minimum 2 providers for meaningful comparison)
 
-**Example scenario:**
-```
-4 providers configured: Alchemy, Infura, LlamaNodes, PublicNode
-- Alchemy: Success (150ms)
-- Infura: Success (180ms)
-- LlamaNodes: Timeout (circuit breaker opens)
-- PublicNode: Rate limited (429)
-
-Result: Report shows Alchemy and Infura data, warns about LlamaNodes/PublicNode failures
-System remains operational with 50% provider capacity
-```
+> **Operational scenario:**
+> Four providers configured: Alchemy, Infura, LlamaNodes, PublicNode
+> - Alchemy: Success (150ms)
+> - Infura: Success (180ms)
+> - LlamaNodes: Timeout (circuit breaker opens)
+> - PublicNode: Rate limited (429)
+>
+> Result: Report shows Alchemy and Infura data with warnings about failures.
+> Operations continue with 50% capacity instead of failing completely.
 
 **Institutional value:**
 In production, partial outages are more common than total failures. A monitoring system that fails completely when any provider is down provides no visibility during the exact time you need it most. Graceful degradation ensures you always have visibility into the providers that *are* working.
 
-#### 4. Error Categorization
+---
+
+### Error Categorization
 
 All errors are classified into actionable categories:
 
@@ -690,13 +522,109 @@ All errors are classified into actionable categories:
 | **Rate Limit** (429) | Exceeded API quota | Retry with backoff | Upgrade provider tier or reduce request rate |
 | **Server Error** (5xx) | Provider infrastructure issue | Retry with backoff | Provider-side problem, failover recommended |
 | **Parse Error** | Invalid JSON or unexpected format | No retry | Investigate provider API changes |
-| **RPC Error** | Application-level error (invalid params, etc.) | No retry | Fix request parameters |
+| **RPC Error** | Application-level error (invalid params) | No retry | Fix request parameters |
 | **Circuit Open** | Circuit breaker active | No retry | Wait for cooldown or failover |
 
 **Why categorization matters:**
 Different error types require different operational responses. Timeouts may indicate network issues. Rate limits require throttling. Server errors suggest provider problems. Parse errors indicate API contract changes.
 
 The categorized error counts in snapshot reports help diagnose systemic issues (e.g., 90% timeouts = network problem, 90% rate limits = quota exhaustion).
+
+---
+
+## Provider Economics & Expectations
+
+Understanding provider tiers helps set realistic expectations and make informed infrastructure decisions.
+
+### Public RPC Endpoints
+
+**Characteristics:**
+* Success rate: ~90–98%
+* P95 latency: 300–800ms
+* Rate limited (typically 10-100 req/s)
+* No SLA or support
+* Free
+
+**Examples:** Alchemy free tier, Infura free tier, LlamaNodes, PublicNode
+
+> **Use case:** Development, testing, emergency fallback
+
+**Operational reality:**
+Public endpoints are adequate for development but unsuitable for production custody or trading systems. Expect occasional downtime, rate limiting during network congestion, and no recourse when issues occur.
+
+---
+
+### Enterprise Providers
+
+**Characteristics:**
+* Success rate: ≥99.9%
+* P95 latency: 50–150ms
+* Dedicated capacity (thousands of req/s)
+* SLA-backed uptime guarantees
+* 24/7 support and incident response
+* Archive node access for historical queries
+* Cost: $500-$5,000+/month depending on volume
+
+**Examples:** Alchemy Growth/Scale plans, Infura Enterprise, Blockdaemon, Figment
+
+> **Use case:** Production systems handling real user funds, custody platforms, institutional trading
+
+**Operational reality:**
+Enterprise providers deliver consistent performance but at significant cost. The SLA provides recourse (credits, escalation) but doesn't prevent impact. Multiple enterprise providers in active-active configuration is common for critical systems.
+
+---
+
+### Self-Hosted Nodes
+
+**Characteristics:**
+* Success rate: 99–100% (when properly maintained)
+* Latency: <10ms (local network), 50-200ms (WAN)
+* No rate limits
+* Full control over configuration, peering, and upgrades
+* No third-party data exposure
+* Cost: Infrastructure + operational overhead ($2,000-$10,000+/month all-in)
+
+**Infrastructure:** Geth/Erigon execution client + Prysm/Lighthouse consensus client
+
+> **Use case:** Sovereignty requirements, MEV operations, high-frequency trading, regulatory compliance
+
+**Operational reality:**
+Self-hosting eliminates third-party risk but introduces operational complexity: hardware failures, consensus client bugs, peer connectivity issues, storage growth, upgrade coordination. Requires dedicated devops expertise.
+
+---
+
+> **Decision-maker summary:**
+>
+> * **Public endpoints** optimize for cost (free) at expense of reliability
+> * **Enterprise endpoints** optimize for reliability at significant cost
+> * **Self-hosting** optimizes for control at expense of operational complexity
+> * **Monitoring** turns hidden risk into visible tradeoffs, enabling informed decisions
+
+**Common production patterns:**
+
+**Pattern 1: Multi-provider redundancy (most common)**
+```
+Primary: Alchemy Enterprise (SLA-backed, low latency)
+Secondary: Infura Enterprise (geographic diversity)
+Tertiary: Self-hosted Geth (sovereignty, no rate limits)
+Emergency: Public Alchemy (zero cost, rate limited)
+```
+
+**Pattern 2: Geographic distribution**
+```
+US East: Alchemy endpoint in us-east-1
+EU West: Infura endpoint in eu-west-1
+Asia Pacific: Blockdaemon endpoint in ap-southeast-1
+```
+
+**Pattern 3: Workload segregation**
+```
+Read-heavy queries (balances, block data): Managed providers (Alchemy/Infura)
+Transaction broadcast: Self-hosted nodes (guaranteed delivery, no censorship risk)
+Archive queries (historical state): Enterprise with archive access
+```
+
+---
 
 ## RPC Methods and Institutional Impact
 
@@ -721,13 +649,17 @@ The categorized error counts in snapshot reports help diagnose systemic issues (
   - 3-5 blocks behind: Degraded (investigate sync issues)
   - 6+ blocks behind: Critical (data integrity risk for time-sensitive operations)
 
-**Example operational scenario:**
-A custody platform receives a deposit transaction in block N. Before crediting the user's account, the platform queries multiple providers to confirm the transaction. If Provider A reports block N but Provider B is still at block N-10, using Provider B could lead to:
-- Delayed transaction confirmation
-- Incorrect balance calculations
-- User complaints about "missing" deposits
+> **Operational scenario:**
+> A custody platform receives a deposit transaction in block N.
+> Before crediting the user's account, the platform queries multiple providers to confirm the transaction.
+> If Provider A reports block N but Provider B is still at block N-10, using Provider B could lead to:
+> - Delayed transaction confirmation (user complains about "missing" deposit)
+> - Incorrect balance calculations (reconciliation failures)
+> - Compliance violations (audit trail inconsistencies)
+>
+> The monitoring tool's height variance detection catches this scenario before it impacts users.
 
-The monitoring tool's height variance detection catches this scenario before it impacts users.
+---
 
 ### eth_getBlockByNumber
 
@@ -772,8 +704,11 @@ Hash mismatches are critical because:
 - **Missing transactions:** Transactions in the canonical chain may be missed if stale data is used
 - **Compliance issues:** Incorrect transaction histories can violate audit and regulatory requirements
 
-**Example critical scenario:**
-A trading desk executes a large ETH sale, broadcasting the transaction to Provider A. The transaction is included in block N on Provider A. The desk's settlement system, using Provider B for confirmation, doesn't see the transaction in block N (due to hash mismatch from a reorg). The desk's system incorrectly assumes the transaction failed and resubmits, resulting in a double-sell and significant capital loss.
+> **Critical scenario:**
+> A trading desk executes a large ETH sale, broadcasting the transaction to Provider A.
+> The transaction is included in block N on Provider A.
+> The desk's settlement system, using Provider B for confirmation, doesn't see the transaction in block N (due to hash mismatch from a reorg).
+> The desk's system incorrectly assumes the transaction failed and resubmits, resulting in a double-sell and significant capital loss.
 
 **Tool's consistency detection:**
 The monitor flags hash mismatches immediately:
@@ -786,6 +721,8 @@ This allows operators to:
 1. Investigate the discrepancy before relying on the data
 2. Temporarily exclude the minority provider from production traffic
 3. Wait for reorg resolution or escalate to provider support if cache issue persists
+
+---
 
 ### eth_call
 
@@ -802,7 +739,7 @@ This allows operators to:
 - **Function selector computation:** Keccak-256 hashing and 4-byte extraction
 - **Address encoding:** 20-byte address → 32-byte left-padded parameter
 - **Return value decoding:** Hex-encoded uint256 → human-readable token amount
-- **Decimal handling:** Converting raw token amounts (e.g., 100000000) to decimal notation (100.000000 USDC)
+- **Decimal handling:** Converting raw token amounts to decimal notation with proper formatting
 
 **Implementation reference (USDC balance query):**
 
@@ -816,107 +753,100 @@ This allows operators to:
    ```
    0x70a08231000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045
    ```
-5. **RPC request:**
-   ```json
-   {
-     "jsonrpc": "2.0",
-     "method": "eth_call",
-     "params": [
-       {
-         "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-         "data": "0x70a08231000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
-       },
-       "latest"
-     ],
-     "id": 1
-   }
-   ```
-6. **RPC response:**
-   ```json
-   {
-     "jsonrpc": "2.0",
-     "id": 1,
-     "result": "0x0000000000000000000000000000000000000000000000000000000005f5e100"
-   }
-   ```
-7. **Decoding:**
+5. **Return value decoding:**
+   - RPC returns: `0x0000000000000000000000000000000000000000000000000000000005f5e100`
    - Hex: `0x05f5e100` = 100000000 (decimal)
    - With 6 decimals: 100.000000 USDC
-8. **Formatted output:**
-   ```
-   Balance: 100.000000 USDC
-   ```
 
 **Educational value:**
-This implementation serves as a complete reference for:
-- Ethereum ABI encoding specification (from yellow paper)
-- Keccak-256 hashing (using golang.org/x/crypto/sha3)
-- Big integer handling for uint256 types
-- ERC-20 standard interface implementation
-- Provider response consistency verification (different providers should return identical balances)
+This implementation serves as a complete reference for Ethereum ABI encoding specification, Keccak-256 hashing, big integer handling, and ERC-20 standard interface implementation.
 
-**Extensibility:**
-The ABI encoding logic can be extended to support:
-- Other ERC-20 methods (totalSupply, allowance, symbol, decimals)
-- ERC-721 NFT queries (ownerOf, balanceOf, tokenURI)
-- Custom contract interfaces (governance voting, staking rewards, etc.)
-- Multi-call aggregation (batch multiple queries into one RPC call)
+---
 
-## Deployment Reality
+## Architecture
 
-This tool monitors public RPC endpoints for demonstration and portability. In production institutional environments, the infrastructure landscape varies:
-
-| Environment | Infrastructure | Performance Expectations | Use Case |
-|-------------|---------------|-------------------------|----------|
-| **Public Tier** | Free endpoints (Alchemy, Infura, LlamaNodes) | Rate limited (≤100 req/s), no SLA, variable latency (100-500ms), occasional downtime | Development, testing, low-volume applications, emergency fallback |
-| **Enterprise Tier** | Paid managed services (Alchemy Growth/Scale, Infura Enterprise, Blockdaemon, Figment) | SLA-backed (99.9%+), dedicated capacity, optimized routing, <100ms latency, archive data access | Production primary endpoints, high-volume applications, institutional custody |
-| **Self-Hosted** | Geth/Erigon execution + Prysm/Lighthouse consensus | Full control, no rate limits, network-dependent latency (LAN: <10ms, WAN: 50-200ms), operational overhead | Sovereignty requirements, MEV, high-frequency trading, regulatory compliance |
-| **Hybrid** | Primary self-hosted + enterprise fallback | Best of both worlds, operational complexity | Large institutional deployments, critical infrastructure |
-
-**The monitoring logic is identical regardless of endpoint type.** Only the SLAs, rate limits, and expected performance differ.
-
-### Real-World Deployment Patterns
-
-**Pattern 1: Multi-provider redundancy (most common)**
-```yaml
-Primary: Alchemy Enterprise (SLA-backed, low latency)
-Secondary: Infura Enterprise (geographic diversity)
-Tertiary: Self-hosted Geth (sovereignty, no rate limits)
-Emergency: Public Alchemy (zero cost, rate limited)
+```
+eth-rpc-monitor/
+├── cmd/
+│   └── monitor/
+│       ├── main.go              # Minimal CLI entry point, Cobra setup
+│       ├── snapshot.go           # Snapshot command and execution logic
+│       ├── watch.go              # Watch command and live monitoring logic
+│       ├── blocks.go             # Blocks command, execution, and block arg parsing
+│       ├── txs.go                # Transactions command and execution logic
+│       ├── call.go               # Contract call command and execution logic
+│       ├── status.go             # Status command and health check logic
+│       └── helpers.go            # Shared utilities (config loading, client building, provider selection, consistency checks)
+│
+├── internal/
+│   ├── config/
+│   │   └── config.go            # YAML configuration parsing and validation
+│   │
+│   ├── rpc/
+│   │   ├── client.go            # JSON-RPC client with production resilience
+│   │   │                        # - Exponential backoff with jitter
+│   │   │                        # - Circuit breaker (3 failures → 30s cooldown)
+│   │   │                        # - Automatic retry with configurable attempts
+│   │   │                        # - Error categorization
+│   │   │
+│   │   ├── methods.go          # Ethereum RPC method implementations
+│   │   │                        # - eth_getBlockByNumber
+│   │   │                        # - eth_blockNumber
+│   │   │                        # - eth_call
+│   │   │
+│   │   ├── abi.go              # ABI encoding and decoding utilities
+│   │   │                        # - Keccak-256 function selector computation
+│   │   │                        # - Address padding and encoding
+│   │   │                        # - uint256 decoding and formatting
+│   │   │
+│   │   └── abi_test.go          # ABI encoding tests
+│   │
+│   ├── metrics/
+│   │   ├── collector.go        # Metrics aggregation and statistical analysis
+│   │   │                        # - Latency percentile calculation
+│   │   │                        # - Success rate computation
+│   │   │                        # - Error categorization
+│   │   │
+│   │   ├── consistency.go      # Cross-provider consistency verification
+│   │   │                        # - Block height variance detection
+│   │   │                        # - Two-phase hash consensus
+│   │   │                        # - Hash group identification
+│   │   │
+│   │   └── consistency_test.go # Consistency checker tests
+│   │
+│   ├── provider/
+│   │   └── selector.go         # Smart provider selection and health scoring
+│   │                            # - Quick health check
+│   │                            # - Composite score calculation
+│   │                            # - Exclusion logic
+│   │
+│   └── output/
+│       ├── terminal.go         # Terminal rendering with ANSI colors
+│       ├── json.go             # JSON output formatting
+│       ├── blocks.go           # Block and transaction rendering
+│       ├── call.go              # Contract call result rendering
+│       ├── status.go           # Provider status/ranking rendering
+│       └── watch.go            # Watch mode live display
+│
+└── config/
+    └── providers.yaml           # Default provider configuration
 ```
 
-**Pattern 2: Geographic distribution**
-```yaml
-US East: Alchemy endpoint in us-east-1
-EU West: Infura endpoint in eu-west-1
-Asia Pacific: Blockdaemon endpoint in ap-southeast-1
-```
+**Project structure rationale:**
 
-**Pattern 3: Workload segregation**
-```yaml
-Read-heavy queries (balances, block data): Managed providers (Alchemy/Infura)
-Transaction broadcast: Self-hosted nodes (guaranteed delivery, no censorship)
-Archive queries (historical state): Enterprise with archive access
-```
+**Why `internal/` package:**
+Go's `internal/` directory enforces package-private visibility, preventing external projects from importing these packages. This ensures the codebase remains focused on the CLI tool's needs without maintaining a stable public API.
 
-**Monitoring role in these patterns:**
+**Separation of concerns:**
+- **`rpc/`**: Protocol-level communication (JSON-RPC, HTTP, retries)
+- **`metrics/`**: Business logic (statistical analysis, consistency checking)
+- **`output/`**: Presentation layer (terminal formatting, JSON serialization)
+- **`config/`**: Configuration management (YAML parsing, validation)
+- **`provider/`**: Higher-level provider management (health checks, ranking)
 
-This tool helps validate that your provider mix is actually delivering the expected performance and consistency:
+This separation makes the codebase easier to test, extend, and maintain.
 
-1. **SLA verification:** Enterprise providers should show <100ms p95 latency, 99.9%+ success rate
-2. **Geographic optimization:** Endpoints closer to your infrastructure should show lower latency
-3. **Consistency validation:** All providers should agree on block hashes (reorgs aside)
-4. **Failover testing:** Circuit breaker and retry logic simulate provider outages
-5. **Cost optimization:** If public tier performs adequately for your workload, enterprise tier may not be necessary
-
-**Status command for capacity planning:**
-
-The `status` command's provider ranking directly informs failover configuration:
-```
-Recommended priority: Alchemy → Infura → LlamaNodes
-```
-
-This ranking should be reflected in your application's provider list ordering, ensuring traffic is routed to the best-performing endpoint first.
+---
 
 ## Sample Output
 
@@ -938,16 +868,6 @@ Provider Performance
 │ LlamaNodes   │ ⚠ SLOW │ 312ms  │ 876ms  │ 1.2s   │ 94.0%   │
 │ PublicNode   │ ✗ DOWN │ —      │ —      │ —      │ 34.0%   │
 └──────────────┴────────┴────────┴────────┴────────┴─────────┘
-
-Error Breakdown
-┌──────────────┬──────────┬────────────┬─────────┐
-│ Provider     │ Timeouts │ Rate Limit │ Other   │
-├──────────────┼──────────┼────────────┼─────────┤
-│ Alchemy      │ 0        │ 0          │ 0       │
-│ Infura       │ 1        │ 0          │ 0       │
-│ LlamaNodes   │ 2        │ 0          │ 0       │
-│ PublicNode   │ 15       │ 3          │ 2       │
-└──────────────┴──────────┴────────────┴─────────┘
 
 Block Height Consistency
   Network Height: 19,234,567 (via Alchemy)
@@ -997,117 +917,7 @@ Operational Assessment
   └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Raw JSON Output (Example)
-
-```json
-{
-  "timestamp": "2025-01-14T14:32:01Z",
-  "sampleCount": 30,
-  "providers": {
-    "Alchemy": {
-      "name": "Alchemy",
-      "status": "UP",
-      "latencyAvg": 0.152,
-      "latencyP50": 0.138,
-      "latencyP95": 0.201,
-      "latencyP99": 0.287,
-      "latencyMax": 0.312,
-      "successRate": 100.0,
-      "totalCalls": 30,
-      "failures": 0,
-      "timeouts": 0,
-      "rateLimits": 0,
-      "serverErrors": 0,
-      "parseErrors": 0,
-      "otherErrors": 0,
-      "latestBlock": 19234567,
-      "latestBlockHash": "0x742e...a3f1"
-    },
-    "Infura": {
-      "name": "Infura",
-      "status": "UP",
-      "latencyAvg": 0.167,
-      "latencyP50": 0.145,
-      "latencyP95": 0.219,
-      "latencyP99": 0.298,
-      "latencyMax": 0.334,
-      "successRate": 98.0,
-      "totalCalls": 30,
-      "failures": 1,
-      "timeouts": 1,
-      "rateLimits": 0,
-      "serverErrors": 0,
-      "parseErrors": 0,
-      "otherErrors": 0,
-      "latestBlock": 19234567,
-      "latestBlockHash": "0x742e...a3f1"
-    }
-  },
-  "consistency": {
-    "heights": {
-      "Alchemy": 19234567,
-      "Infura": 19234567,
-      "LlamaNodes": 19234566,
-      "PublicNode": 19234561
-    },
-    "maxHeight": 19234567,
-    "heightVariance": 6,
-    "heightConsensus": false,
-    "authoritativeProvider": "Alchemy",
-    "referenceHeight": 19234561,
-    "hashes": {
-      "Alchemy": "0x742e...a3f1",
-      "Infura": "0x742e...a3f1",
-      "LlamaNodes": "0x742e...a3f1",
-      "PublicNode": "0x8b2d...c4e7"
-    },
-    "hashConsensus": false,
-    "hashGroups": [
-      {
-        "hash": "0x742e...a3f1",
-        "providers": ["Alchemy", "Infura", "LlamaNodes"]
-      },
-      {
-        "hash": "0x8b2d...c4e7",
-        "providers": ["PublicNode"]
-      }
-    ],
-    "consistent": false,
-    "issues": [
-      "Block height variance of 6 blocks exceeds threshold",
-      "Provider(s) [PublicNode] report different block hash at height 19234561 (possible reorg or stale cache)"
-    ]
-  }
-}
-```
-
-**JSON output use cases:**
-
-1. **Monitoring platform integration:**
-   ```bash
-   ./monitor snapshot --format json | jq '.providers.Alchemy.latencyP95'
-   # Feed to Prometheus, Datadog, Grafana, etc.
-   ```
-
-2. **Automated alerting:**
-   ```bash
-   successRate=$(./monitor snapshot --format json | jq '.providers.Alchemy.successRate')
-   if (( $(echo "$successRate < 95" | bc -l) )); then
-     send_alert "Alchemy success rate dropped to $successRate%"
-   fi
-   ```
-
-3. **Historical trending:**
-   ```bash
-   # Collect snapshots every 60 seconds and store for analysis
-   while true; do
-     ./monitor snapshot --format json >> monitoring_log.jsonl
-     sleep 60
-   done
-   ```
-
-4. **SLA compliance reporting:**
-   Parse JSON output to generate monthly uptime reports, latency distributions, and consistency metrics for management and auditors.
+---
 
 ## Development
 
@@ -1122,9 +932,6 @@ Operational Assessment
 ```bash
 # Standard build
 go build -o monitor ./cmd/monitor
-
-# Build with version information
-go build -ldflags="-X 'main.Version=1.0.0'" -o monitor ./cmd/monitor
 
 # Build for different platforms (cross-compilation)
 GOOS=linux GOARCH=amd64 go build -o monitor-linux ./cmd/monitor
@@ -1142,24 +949,7 @@ go test -cover ./...
 
 # Run tests with race detector (detect concurrency issues)
 go test -race ./...
-
-# Run specific package tests
-go test ./internal/rpc/...
-go test ./internal/metrics/...
-
-# Verbose test output
-go test -v ./...
 ```
-
-**Test coverage:**
-Key packages with test coverage:
-- `internal/rpc/abi_test.go`: ABI encoding/decoding logic
-- `internal/metrics/consistency_test.go`: Consistency checking algorithms
-
-**Future testing enhancements:**
-- Integration tests with mock RPC servers
-- Benchmark tests for latency calculation performance
-- Fuzzing for ABI encoding edge cases
 
 ### Dependencies
 
@@ -1172,25 +962,10 @@ Key packages with test coverage:
 | [golang.org/x/crypto](https://golang.org/x/crypto) | Keccak-256 hashing for ABI function selectors | v0.47.0 |
 | [golang.org/x/sync/errgroup](https://golang.org/x/sync) | Concurrent goroutine management with error handling | v0.19.0 |
 
-**Dependency management:**
-This project uses Go modules (`go.mod`) for reproducible builds. All dependencies are pinned to specific versions to ensure consistent behavior across environments.
-
 **No external RPC libraries:**
 Intentionally does not use libraries like `go-ethereum/ethclient` to demonstrate the raw JSON-RPC protocol from first principles. This makes the code more educational and avoids heavyweight dependencies.
 
-### Project Structure Rationale
-
-**Why `internal/` package:**
-Go's `internal/` directory enforces package-private visibility, preventing external projects from importing these packages. This ensures the codebase remains focused on the CLI tool's needs without maintaining a stable public API.
-
-**Separation of concerns:**
-- **`rpc/`**: Protocol-level communication (JSON-RPC, HTTP, retries)
-- **`metrics/`**: Business logic (statistical analysis, consistency checking)
-- **`output/`**: Presentation layer (terminal formatting, JSON serialization)
-- **`config/`**: Configuration management (YAML parsing, validation)
-- **`provider/`**: Higher-level provider management (health checks, ranking)
-
-This separation makes the codebase easier to test, extend, and maintain.
+---
 
 ## Roadmap
 
@@ -1202,18 +977,39 @@ This separation makes the codebase easier to test, extend, and maintain.
 - ✅ Phase 5: Smart provider selection with health-based ranking
 
 **Future enhancements:**
-- **Automated provider recommendations:** Machine learning-based scoring that adapts to workload patterns
 - **Additional RPC methods:** eth_getTransactionReceipt, eth_estimateGas, eth_getLogs
 - **WebSocket support:** Subscription-based monitoring (newHeads, logs, pendingTransactions)
 - **Prometheus metrics export:** Native integration with Prometheus for long-term monitoring
 - **Alert webhook support:** POST to external URLs when thresholds are breached
-- **Historical database:** Store monitoring data in SQLite or PostgreSQL for trend analysis
-- **Web dashboard:** Browser-based UI for visualizing provider performance
+- **Historical database:** Store monitoring data for trend analysis
 - **Multi-chain support:** Extend to Polygon, Arbitrum, Optimism, Base
+
+---
+
+## Final Takeaway
+
+Ethereum itself is resilient.
+**RPC infrastructure is not.**
+
+This tool helps ensure that when your system asks:
+
+> "Has this transaction been included?"
+> "Is this balance correct?"
+> "Is this block final?"
+
+You can say:
+
+> **"We verified it across providers, at the block and transaction level."**
+
+That verification — the ability to detect stale data, inconsistent hashes, and lagging providers **before** they cause user impact — is the difference between infrastructure you trust and infrastructure you hope works.
+
+---
 
 ## License
 
 MIT License - see LICENSE file for details.
+
+---
 
 ## Author
 
@@ -1237,4 +1033,4 @@ For questions, feedback, or collaboration opportunities, please reach out via [L
 
 **Repository:** [github.com/dmagro/eth-rpc-monitor](https://github.com/dmagro/eth-rpc-monitor)
 
-**Last updated:** January 14, 2025
+**Last updated:** January 15, 2025
