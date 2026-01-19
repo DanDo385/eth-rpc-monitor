@@ -52,59 +52,85 @@ monitor latest --json     # Raw JSON output
 ```
 
 ### 2. Health Check
-Test all providers and compare performance:
+Test all providers and compare tail latency performance:
 
 ```bash
-monitor health
-monitor health --samples 10
+monitor health              # Uses default samples from config (30)
+monitor health --samples 10 # Override with custom sample count
 ```
 
 Output:
 ```
-Testing 5 providers with 5 samples each...
+Testing 4 providers with 30 samples each...
 
-Provider       Type   Success        Avg        P95        Block
-──────────────────────────────────────────────────────────────────
-alchemy        paid      100%       45ms       52ms   21234567
-infura         paid      100%       38ms       47ms   21234567
-ankr           free       80%      156ms      203ms   21234566
-cloudflare     free       60%      287ms      412ms   21234565
-publicnode     free      100%      134ms      178ms   21234567
+Provider       Type   Success      P50      P95      P99      Max        Block
+──────────────────────────────────────────────────────────────────────────────────
+alchemy        public     100%     23ms     45ms     52ms     78ms   21234567
+infura         public     100%     19ms     38ms     47ms     65ms   21234567
+llamanodes     public      97%    142ms    203ms    287ms    412ms   21234566
+publicnode     public     100%    134ms    178ms    245ms    389ms   21234567
 ```
 
 **Insights:**
-- Paid providers (Alchemy, Infura) show consistent low latency
-- Free endpoints have higher variance and occasional stale data
+- **P50 (median)**: Typical response time
+- **P95**: 95% of requests faster than this (captures outliers)
+- **P99**: 99th percentile (worst-case scenarios)
+- **Max**: Absolute worst observed latency
 - Block height differences indicate sync lag
+- Tail latency metrics (P95/P99/Max) are critical for trading systems where outliers cause missed opportunities
 
 ### 3. Fork Detection
-Compare block hashes across providers to detect chain splits or stale caches:
+Compare block hashes and heights across providers to detect chain splits, stale caches, or sync lag:
 
 ```bash
-monitor compare latest
-monitor compare 19000000
+monitor compare              # Compare latest block
+monitor compare latest       # Same as above
+monitor compare 19000000     # Compare specific block
 ```
 
 Output:
 ```
-Fetching block latest from 5 providers...
+Fetching block latest from 4 providers...
 
-Provider       Latency   Block Hash
-────────────────────────────────────────────────────────────────────────────────
-alchemy          43ms   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
-infura           39ms   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
-ankr            167ms   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
-cloudflare      289ms   0x9876543210fedcba0987654321fedcba0987654321fedcba0987654321fedcb
-publicnode      142ms   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+Provider       Latency   Block Height   Block Hash
+──────────────────────────────────────────────────────────────────────────────────────
+alchemy          43ms        21234567   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+infura           39ms        21234567   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+llamanodes      167ms        21234566   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+publicnode      142ms        21234567   0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
 
-⚠ HASH MISMATCH DETECTED:
-  0xa1b2c3d4e5f678...  →  [alchemy infura ankr publicnode]
+⚠ BLOCK HEIGHT MISMATCH DETECTED:
+  Height 21234567  →  [alchemy infura publicnode]
+  Height 21234566  →  [llamanodes]
+
+This may indicate lagging providers or propagation delays.
+
+⚠ BLOCK HASH MISMATCH DETECTED:
+  0xa1b2c3d4e5f678...  →  [alchemy infura llamanodes publicnode]
   0x9876543210fedc...  →  [cloudflare]
 
-This may indicate stale cache or chain reorganization.
+This may indicate stale caches, chain reorganization, or incorrect data.
 ```
 
-**Why this matters:** If your trading bot uses the stale Cloudflare data, it might execute trades based on outdated state, leading to failed transactions or losses.
+**Why this matters:**
+- **Height mismatches**: Provider is lagging behind the chain (propagation delay or sync issues)
+- **Hash mismatches**: Providers disagree on block data (stale cache, chain reorganization, or fork)
+- If your trading bot uses stale data, it might execute trades based on outdated state, leading to failed transactions or losses
+
+### 4. Continuous Monitoring
+Watch all providers in real-time with automatic refresh:
+
+```bash
+monitor watch                # Uses default interval from config (30s)
+monitor watch --interval 10s # Override with custom interval
+```
+
+Output updates continuously showing:
+- Current block height per provider
+- Latency for each request
+- Lag vs highest observed block (shows which providers are behind)
+
+Press Ctrl+C to exit gracefully.
 
 ## Installation
 
@@ -122,45 +148,61 @@ go build -o monitor ./cmd/monitor
 
 ## Configuration
 
-Create or edit `config/providers.yaml`:
+Create or edit `config/providers.yaml` (copy from `config/providers.yaml.example`):
 
 ```yaml
 defaults:
   timeout: 10s
   max_retries: 3
+  health_samples: 30      # Default samples for health command
+  watch_interval: 30s     # Default refresh interval for watch command
 
 providers:
+  # Alchemy – managed public RPC
   - name: alchemy
-    url: ${ALCHEMY_URL}
-    type: paid
+    url: https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+    type: public
 
+  # Infura – ConsenSys managed public RPC
   - name: infura
-    url: ${INFURA_URL}
-    type: paid
+    url: https://mainnet.infura.io/v3/YOUR_API_KEY
+    type: public
 
-  - name: ankr
-    url: https://rpc.ankr.com/eth
-    type: free
+  # LlamaNodes – community public RPC
+  - name: llamanodes
+    url: https://eth.llamarpc.com
+    type: public
 
-  - name: cloudflare
-    url: https://cloudflare-eth.com
-    type: free
-
+  # PublicNode – community public RPC
   - name: publicnode
     url: https://ethereum-rpc.publicnode.com
-    type: free
+    type: public
+
+  # Example self-hosted (commented)
+  # - name: local-geth
+  #   url: http://localhost:8545
+  #   type: self_hosted
+  #   timeout: 5s
+
+  # Example enterprise (commented)
+  # - name: alchemy-enterprise
+  #   url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
+  #   type: enterprise
+  #   timeout: 15s
 ```
 
 ### Environment Variables
 
-For paid providers, set environment variables:
+URLs support `${VAR}` syntax for environment variable expansion:
 
 ```bash
 export ALCHEMY_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
 export INFURA_URL="https://mainnet.infura.io/v3/YOUR_API_KEY"
 ```
 
-The config automatically expands `${ALCHEMY_URL}` and `${INFURA_URL}` using these environment variables.
+The config automatically expands environment variables using `os.ExpandEnv()`.
+
+**Note:** The `type` field (public, self_hosted, enterprise) is informational only and does not affect provider behavior.
 
 ## Usage Examples
 
@@ -172,9 +214,9 @@ Run before deploying trading systems to verify all RPC endpoints are responsive.
 
 ### Monitor block production during high activity
 ```bash
-watch -n 1 'monitor latest'
+monitor watch
 ```
-Watch blocks arrive in real-time. Useful during network congestion or major events.
+Watch all providers continuously with automatic refresh. Useful during network congestion or major events.
 
 ### Verify historical data consistency
 ```bash
@@ -215,13 +257,16 @@ Block #21,234,567
 ### Health Check Metrics
 
 - **Success rate**: % of requests that succeeded
-- **Avg latency**: Mean response time
+- **P50 latency**: Median response time (typical performance)
 - **P95 latency**: 95th percentile (captures outliers)
+- **P99 latency**: 99th percentile (worst-case scenarios)
+- **Max latency**: Absolute worst observed latency
 - **Block height**: Current sync state
 
 **Red flags:**
 - Success rate < 95%
-- P95 > 2x Avg (high variance)
+- P99 >> P50 (high variance, unpredictable performance)
+- P99 > 500ms for paid providers (consider switching)
 - Block height lagging behind others
 
 ## Architecture
@@ -231,18 +276,19 @@ This tool follows a simple, maintainable design:
 ```
 cmd/monitor/
 ├── main.go      # Main CLI and block inspector
-├── health.go    # Health check command
-└── compare.go   # Block comparison command
+├── health.go    # Health check command (tail latency metrics)
+├── compare.go   # Block comparison command (fork detection)
+└── watch.go     # Continuous monitoring command
 
 internal/
 ├── config/
-│   └── config.go      # YAML configuration loader
+│   └── config.go      # YAML configuration loader with env expansion
 └── rpc/
     ├── types.go       # Block and response types
-    └── client.go      # HTTP JSON-RPC client
+    └── client.go      # HTTP JSON-RPC client with retry
 
 config/
-└── providers.yaml     # Provider configuration
+└── providers.yaml     # Provider configuration (single source of truth)
 ```
 
 **Design principles:**
@@ -260,7 +306,11 @@ Check that `config/providers.yaml` includes a provider with that exact name.
 Specify config path: `monitor --config /path/to/providers.yaml`
 
 ### "defaults.timeout is required"
-Add `defaults` section to `providers.yaml` with `timeout` and `max_retries`.
+Add `defaults` section to `providers.yaml` with required fields:
+- `timeout`: Request timeout (e.g., `10s`)
+- `max_retries`: Retry count (e.g., `3`)
+- `health_samples`: Default samples for health command (e.g., `30`)
+- `watch_interval`: Default refresh interval for watch (e.g., `30s`)
 
 ### All providers showing high latency
 - Check your internet connection
@@ -269,6 +319,9 @@ Add `defaults` section to `providers.yaml` with `timeout` and `max_retries`.
 
 ### Hash mismatch on recent blocks
 This is normal during chain reorganizations (reorgs). If it persists for >5 blocks, one provider may be on a stale fork.
+
+### Height mismatch in compare output
+If providers show different block heights for `latest`, some providers are lagging behind. This is common with free public endpoints during high network activity. Consider using paid providers with SLAs for production systems.
 
 ## Performance Considerations
 
