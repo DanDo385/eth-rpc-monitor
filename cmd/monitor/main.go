@@ -1,3 +1,4 @@
+// cmd/monitor/main.go
 package main
 
 import (
@@ -51,6 +52,7 @@ Examples:
 
 	rootCmd.AddCommand(healthCmd())
 	rootCmd.AddCommand(compareCmd())
+	rootCmd.AddCommand(watchCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

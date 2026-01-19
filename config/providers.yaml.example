@@ -1,37 +1,40 @@
-# Ethereum RPC Provider Configuration
-#
-# To use this file:
-# 1. Copy to providers.yaml: cp config/providers.yaml.example config/providers.yaml
-# 2. Replace placeholder environment variables or API keys with your actual values
-# 3. providers.yaml is gitignored and will not be committed
-
 defaults:
   timeout: 10s
   max_retries: 3
+  health_samples: 30
+  watch_interval: 30s
 
 providers:
-  # Paid providers - replace with your API keys or use environment variables
+  # Alchemy – managed public RPC
   - name: alchemy
-    url: ${ALCHEMY_URL}  # or https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
-    type: paid
+    url: https://eth-mainnet.g.alchemy.com/v2/0SaugUrj75N_bDS-KCTF2G8Yltuzr-f2
+    type: public
+    # enterprise example:
+    # url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
 
+  # Infura – ConsenSys managed public RPC
   - name: infura
-    url: ${INFURA_URL}   # or https://mainnet.infura.io/v3/YOUR_API_KEY
-    type: paid
+    url: https://mainnet.infura.io/v3/b352245d9e3640288dd3bc8312cb4c69
+    type: public
 
-  # Free public RPC endpoints - no API key required
-  - name: ankr
-    url: https://rpc.ankr.com/eth
-    type: free
+  # LlamaNodes – community public RPC
+  - name: llamanodes
+    url: https://eth.llamarpc.com
+    type: public
 
-  - name: cloudflare
-    url: https://cloudflare-eth.com
-    type: free
-
+  # PublicNode – community public RPC
   - name: publicnode
     url: https://ethereum-rpc.publicnode.com
-    type: free
+    type: public
 
-# Environment variable setup (optional):
-# export ALCHEMY_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-# export INFURA_URL="https://mainnet.infura.io/v3/YOUR_API_KEY"
+  # Example self-hosted (commented)
+  # - name: local-geth
+  #   url: http://localhost:8545
+  #   type: self_hosted
+  #   timeout: 5s
+
+  # Example enterprise (commented)
+  # - name: alchemy-enterprise
+  #   url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
+  #   type: enterprise
+  #   timeout: 15s

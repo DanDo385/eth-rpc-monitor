@@ -1,3 +1,4 @@
+// internal/config/config.go
 package config
 
 import (
@@ -21,8 +22,10 @@ type Provider struct {
 }
 
 type Defaults struct {
-	Timeout    time.Duration `yaml:"timeout"`
-	MaxRetries int           `yaml:"max_retries"`
+	Timeout      time.Duration `yaml:"timeout"`
+	MaxRetries   int           `yaml:"max_retries"`
+	HealthSamples int          `yaml:"health_samples"`
+	WatchInterval time.Duration `yaml:"watch_interval"`
 }
 
 func Load(path string) (*Config, error) {
@@ -43,8 +46,14 @@ func Load(path string) (*Config, error) {
 	if cfg.Defaults.Timeout == 0 {
 		return nil, fmt.Errorf("defaults.timeout is required")
 	}
-	if cfg.Defaults.MaxRetries == 0 {
-		return nil, fmt.Errorf("defaults.max_retries is required")
+	if cfg.Defaults.MaxRetries < 0 {
+		return nil, fmt.Errorf("defaults.max_retries must be >= 0")
+	}
+	if cfg.Defaults.HealthSamples <= 0 {
+		return nil, fmt.Errorf("defaults.health_samples is required and must be > 0")
+	}
+	if cfg.Defaults.WatchInterval == 0 {
+		return nil, fmt.Errorf("defaults.watch_interval is required")
 	}
 	if len(cfg.Providers) == 0 {
 		return nil, fmt.Errorf("at least one provider is required")

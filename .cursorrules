@@ -1,206 +1,155 @@
 # Ethereum RPC Monitor — Cursor Rules
 
 ## Project Context
-Infrastructure reliability monitor for Ethereum RPC endpoints, expanding into a full Ethereum data exploration toolkit.  
-Target audience: institutional crypto (Solutions Engineers, infra teams at Coinbase, Anchorage, Fireblocks, etc.).  
-This is a portfolio project demonstrating operational thinking, Go proficiency, and understanding of Ethereum data structures.
+Lightweight RPC endpoint monitor and block inspector for Ethereum.
+Target: Portfolio project demonstrating Go proficiency, understanding of Ethereum JSON-RPC, and infrastructure thinking for institutional crypto roles.
 
 ## What This Project Is
-- A CLI tool that monitors RPC endpoint health, latency, and data consistency
-- A toolkit for exploring Ethereum blocks, transactions, and contract state
-- Demonstrates infrastructure resilience patterns used in production systems
-- Shows understanding of Ethereum node infrastructure from an institutional ops perspective
+- CLI tool monitoring RPC endpoint health, latency, and consistency
+- Simple block inspector for verifying RPC responses
+- Demonstrates operational awareness (latency matters for trading)
 
 ## What This Project Is NOT
+- A geth/go-ethereum wrapper (we use raw HTTP)
 - A trading bot or DeFi tool
-- A web application or dashboard
-- A production monitoring system (patterns > scale)
-- A wallet or transaction signing tool
+- A web dashboard
+- A wallet or signing tool
 
-## Tech Constraints
+## Tech Stack
 - Go 1.21+
-- Dependencies:
-  - cobra
-  - fatih/color
-  - rodaine/table
-  - yaml.v3
-  - golang.org/x/sync/errgroup
-  - golang.org/x/crypto/sha3
-- Raw `net/http` for RPC calls (need latency + error visibility)
-- **NO** `ethclient` or `go-ethereum/rpc` packages (defeats the purpose)
+- Dependencies (minimal):
+  - `github.com/spf13/cobra` (CLI)
+  - `gopkg.in/yaml.v3` (config)
+  - `golang.org/x/sync/errgroup` (concurrent provider calls)
+- Raw `net/http` for RPC (need latency visibility)
+- **NO** `go-ethereum` packages
 
 ## Architecture
 ```
-cmd/
-└── monitor/
-    ├── main.go      # Entry point, minimal Cobra CLI setup
-    ├── snapshot.go  # Snapshot command and execution logic
-    ├── watch.go     # Watch command and live monitoring logic
-    ├── blocks.go    # Blocks command, execution, and block arg parsing
-    ├── txs.go       # Transactions command and execution logic
-    ├── call.go      # Contract call command and execution logic
-    ├── status.go    # Status command and health check logic
-    └── helpers.go   # Shared utilities (config loading, client building, provider selection, consistency checks)
+cmd/monitor/
+├── main.go       # Root command + block inspector
+├── health.go     # Provider health check
+├── compare.go    # Cross-provider comparison
+└── watch.go      # Continuous monitoring
 
 internal/
-├── rpc/
-│   ├── client.go    # JSON-RPC client with retry, backoff, circuit breaker
-│   ├── methods.go   # Ethereum RPC method wrappers
-│   ├── abi.go       # ABI encoding/decoding for contract calls
-│   └── abi_test.go  # ABI encoding tests
-├── metrics/
-│   ├── collector.go      # Statistics collection and aggregation
-│   ├── consistency.go   # Cross-provider consistency checking
-│   └── consistency_test.go # Consistency checker tests
-├── output/
-│   ├── terminal.go  # Colored terminal rendering
-│   ├── json.go      # JSON output formatting
-│   ├── blocks.go    # Block and transaction rendering
-│   ├── call.go      # Contract call result rendering
-│   ├── status.go    # Provider status/ranking rendering
-│   └── watch.go     # Watch mode live display
-├── provider/
-│   └── selector.go  # Provider ranking and selection logic
-└── config/
-    └── config.go    # YAML configuration loading and validation
+├── config/
+│   └── config.go # YAML loading, env var expansion
+└── rpc/
+    ├── client.go # HTTP client with optional retry
+    └── types.go  # Block, Request, Response structs + hex parsing
+    
+config/
+└── providers.yaml # Single source of truth for all config
 ```
 
 ## Commands
-| Command | Status | Description |
-|---------|--------|-------------|
-| `monitor snapshot` | DONE | Detailed diagnostic report |
-| `monitor watch` | DONE | Live monitoring |
-| `monitor blocks` | DONE | Fetch block details |
-| `monitor txs` | DONE | List transactions in a block |
-| `monitor call` | DONE | Query contract state |
-| `monitor status` | DONE | Provider health and ranking |
+| Command | Description |
+|---------|-------------|
+| `monitor [block]` | Inspect block (default: latest, auto-selects fastest provider) |
+| `monitor health` | Test all providers, show latency stats |
+| `monitor compare [block]` | Fetch same block from all providers, detect mismatches |
+| `monitor watch` | Continuous monitoring with refresh interval |
 
-## Development Principles
+## Configuration
 
-### Iterate in Small Steps
-- Implement and verify one small feature at a time
-- Test terminal and JSON modes after every change
-- Commit working code before moving on
+### Single Source of Truth
+All defaults live in `config/providers.yaml`. Go code inherits from YAML, never invents fallbacks.
+```yaml
+defaults:
+  timeout: 10s
+  max_retries: 3  # Set to 0 for no retry
 
-### Concurrency with errgroup
-Always use `errgroup.Group` with context instead of raw `sync.WaitGroup`.
+providers:
+  - name: alchemy
+    url: ${ALCHEMY_URL}
+    type: paid
+  - name: ankr
+    url: https://rpc.ankr.com/eth
+    type: free
+```
 
+### Environment Variables
+URLs can use `${VAR}` syntax. Expanded at load time via `os.ExpandEnv()`.
+
+## RPC Client Design
+
+### JSON for Wire Protocol (Required)
+Ethereum JSON-RPC requires JSON. The `json` struct tags in `types.go` are for the wire protocol, not config.
+
+### Retry Policy (Configurable)
+- `max_retries: 0` = fail immediately
+- `max_retries: 3` = retry up to 3 times with exponential backoff
+- No circuit breaker (removed for simplicity)
+
+### Methods Needed
+- `eth_blockNumber` - current height
+- `eth_getBlockByNumber` - block details
+
+## Output Modes
+
+### Terminal (Default)
+Human-readable with formatting. Example:
+```
+Block #19,234,567
+═══════════════════════════════════════════════════
+  Hash:         0xabcd1234...
+  Timestamp:    2024-01-15 14:23:11 UTC (2m ago)
+  Gas:          12,456,789 / 30,000,000 (41.5%)
+  Transactions: 143
+
+  Provider:     alchemy (23ms)
+```
+
+### JSON (`--json` flag)
+Machine-readable. No colors, no formatting, pipe-friendly.
+```bash
+./monitor latest --json | jq '.hash'
+```
+
+## Code Patterns
+
+### Provider Selection
+Race all providers, return first successful response:
 ```go
-import "golang.org/x/sync/errgroup"
-
-g, ctx := errgroup.WithContext(ctx)
-
+resultCh := make(chan result, len(providers))
 for _, p := range providers {
-    p := p // capture loop variable
-    g.Go(func() error {
-        return pollProvider(ctx, p)
-    })
+    go func(p Provider) {
+        // try provider, send to channel if success
+    }(p)
 }
-
-if err := g.Wait(); err != nil {
-    return err
-}
+// Return first result from channel
 ```
 
 ### Error Handling
-- Always wrap errors: `fmt.Errorf("failed to fetch block: %w", err)`
-- Return errors up the stack; Cobra handles display
-- In JSON mode, errors go to stderr only
+- Wrap errors: `fmt.Errorf("context: %w", err)`
+- Return up the stack, let Cobra display
+- In JSON mode, errors to stderr only
 
-### Output Mode Discipline
-- Terminal output is default
-- JSON output only with `--format json`
-- In JSON mode:
-  - NO colors
-  - NO tables
-  - NO status text on stdout
-  - All logs and warnings go to stderr
-- Validate with `| jq .` after every change
-
-### Consistency Checking (CRITICAL)
-- **NEVER** compare block hashes from different heights
-- Always use a two-phase approach:
-  1. Fetch heights from all providers
-  2. `referenceHeight = min(heights)`
-  3. Fetch hashes at exactly `referenceHeight`
-  4. Compare same-height hashes only
-- Prevents false positive mismatch alerts
-
-### Provider Selection Pattern
-- Default: auto-select best provider via health check
-- `--provider <name>` overrides auto-selection
-- Selection order:
-  1. Success rate
-  2. Latency
-  3. Block freshness
-- Always show which provider was selected and why
-
-### Data Formatting Standards
-- Block numbers: accept decimal or hex; use hex for RPC
-- Addresses: validate 40 hex chars (no 0x) or 42 with prefix
-- Hashes: display as `0x1234...abcd`
-- ETH values: convert from wei (÷ 10¹⁸), show 6 decimals
-- Token amounts: apply correct decimals (USDC=6, USDT=6)
-- Timestamps: show UTC time + relative "X ago"
-
-### Hardcoded Constants
+### Hex Parsing
+All Ethereum values are hex. Parse with:
 ```go
-// Mainnet token addresses
-const (
-    USDCAddress = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    USDTAddress = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-)
-
-// ERC-20 function selectors
-const (
-    BalanceOfSelector = "0x70a08231" // keccak256("balanceOf(address)")[:4]
-)
-
-// Token decimals
-const (
-    USDCDecimals = 6
-    USDTDecimals = 6
-)
+func ParseHexUint64(hex string) (uint64, error) {
+    hex = strings.TrimPrefix(hex, "0x")
+    val := new(big.Int)
+    val.SetString(hex, 16)
+    return val.Uint64(), nil
+}
 ```
 
 ## Do NOT
-- Add a web UI
-- Use ethclient or geth RPC helpers
-- Add persistence or databases
-- Add wallet or signing functionality
-- Mix stdout and stderr in JSON mode
-- Compare hashes from different block heights
-- Ignore errors silently
-- Print colors or formatting in JSON output
+- Use `go-ethereum` or `ethclient`
+- Add web UI or persistence
+- Hardcode config values in Go (use YAML)
+- Mix stdout/stderr in JSON mode
+- Compare block hashes from different heights
 
-## Code Style
-- Wrapped, explicit error handling
-- Table-driven tests where appropriate
-- Descriptive variable names
-- Comments explain why, not what
-- Functions should be small (<50 lines when possible)
-
-## Testing Checklist
-After EVERY change:
-- `go build -o monitor ./cmd/monitor`
-- `go test ./...`
-- Terminal test: `./monitor <command>`
-- JSON test: `./monitor <command> --format json`
-- Validate JSON: `./monitor <command> --format json | jq .`
-
-## Test Commands
+## Testing After Every Change
 ```bash
-# Build
 go build -o monitor ./cmd/monitor
-
-# Existing
-./monitor snapshot --samples 10
-./monitor watch --refresh 5s
-
-# New (as implemented)
-./monitor blocks latest
-./monitor blocks 19000000 --raw
-./monitor txs 19000000 --limit 10
-./monitor call usdc balance 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-./monitor status
+./monitor --help
+./monitor health
+./monitor compare
+./monitor latest
+./monitor latest --json | jq .
 ```

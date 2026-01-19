@@ -1,3 +1,4 @@
+// cmd/monitor/health.go
 package main
 
 import (
@@ -20,7 +21,7 @@ func healthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Check health of all configured RPC providers",
-		Long: `Test each provider multiple times and report latency statistics.
+		Long: `Test each provider multiple times and report tail latency statistics.
 
 Examples:
   monitor health
@@ -31,7 +32,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().IntVar(&samples, "samples", 5, "Number of test samples per provider")
+	cmd.Flags().IntVar(&samples, "samples", 0, "Number of test samples per provider (defaults to config)")
 	return cmd
 }
 
@@ -40,15 +41,23 @@ type HealthResult struct {
 	Type        string
 	Success     int
 	Total       int
-	AvgLatency  time.Duration
+	P50Latency  time.Duration
 	P95Latency  time.Duration
+	P99Latency  time.Duration
+	MaxLatency  time.Duration
 	BlockHeight uint64
 }
 
-func runHealth(cfgPath string, samples int) error {
+func runHealth(cfgPath string, samplesOverride int) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
+	}
+
+	// Use config default unless explicitly overridden
+	samples := cfg.Defaults.HealthSamples
+	if samplesOverride > 0 {
+		samples = samplesOverride
 	}
 
 	fmt.Printf("\nTesting %d providers with %d samples each...\n\n", len(cfg.Providers), samples)
@@ -67,18 +76,20 @@ func runHealth(cfgPath string, samples int) error {
 	wg.Wait()
 
 	// Print results table
-	fmt.Printf("%-14s %-6s %8s %10s %10s %12s\n",
-		"Provider", "Type", "Success", "Avg", "P95", "Block")
-	fmt.Println(strings.Repeat("─", 70))
+	fmt.Printf("%-14s %-6s %8s %8s %8s %8s %8s %12s\n",
+		"Provider", "Type", "Success", "P50", "P95", "P99", "Max", "Block")
+	fmt.Println(strings.Repeat("─", 90))
 
 	for _, r := range results {
 		successPct := float64(r.Success) / float64(r.Total) * 100
-		fmt.Printf("%-14s %-6s %7.0f%% %8dms %8dms %12d\n",
+		fmt.Printf("%-14s %-6s %7.0f%% %7dms %7dms %7dms %7dms %12d\n",
 			r.Name,
 			r.Type,
 			successPct,
-			r.AvgLatency.Milliseconds(),
+			r.P50Latency.Milliseconds(),
 			r.P95Latency.Milliseconds(),
+			r.P99Latency.Milliseconds(),
+			r.MaxLatency.Milliseconds(),
 			r.BlockHeight)
 	}
 	fmt.Println()
@@ -106,41 +117,51 @@ func testProvider(p config.Provider, maxRetries, samples int) HealthResult {
 		}
 	}
 
-	avg, p95 := calculateLatencyStats(latencies)
+	p50, p95, p99, max := calculateTailLatency(latencies)
 
 	return HealthResult{
 		Name:        p.Name,
 		Type:        p.Type,
 		Success:     success,
 		Total:       samples,
-		AvgLatency:  avg,
+		P50Latency:  p50,
 		P95Latency:  p95,
+		P99Latency:  p99,
+		MaxLatency:  max,
 		BlockHeight: lastHeight,
 	}
 }
 
-func calculateLatencyStats(latencies []time.Duration) (avg, p95 time.Duration) {
+// calculateTailLatency computes P50, P95, P99, and Max from sorted samples
+// Empty samples return zero values
+func calculateTailLatency(latencies []time.Duration) (p50, p95, p99, max time.Duration) {
 	if len(latencies) == 0 {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 
-	// Calculate average
-	var total time.Duration
-	for _, l := range latencies {
-		total += l
-	}
-	avg = total / time.Duration(len(latencies))
-
-	// Calculate P95
+	// Sort latencies for percentile calculation
 	sorted := make([]time.Duration, len(latencies))
 	copy(sorted, latencies)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
-	p95Index := int(float64(len(sorted)) * 0.95)
-	if p95Index >= len(sorted) {
-		p95Index = len(sorted) - 1
-	}
-	p95 = sorted[p95Index]
+	// Calculate percentiles from sorted samples
+	n := len(sorted)
+	p50 = percentile(sorted, n, 0.50)
+	p95 = percentile(sorted, n, 0.95)
+	p99 = percentile(sorted, n, 0.99)
+	max = sorted[n-1] // Maximum is the last element after sorting
 
-	return avg, p95
+	return p50, p95, p99, max
+}
+
+// percentile returns the value at the given percentile in sorted slice
+func percentile(sorted []time.Duration, n int, p float64) time.Duration {
+	if n == 0 {
+		return 0
+	}
+	index := int(float64(n-1) * p)
+	if index >= n {
+		index = n - 1
+	}
+	return sorted[index]
 }
