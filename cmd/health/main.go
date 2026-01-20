@@ -5,9 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -240,7 +238,7 @@ func testProvider(p config.Provider, maxRetries, samples int) HealthResult {
 	// Warm-up request to establish connection (discard result)
 	// This eliminates connection setup overhead (TCP handshake, TLS negotiation, DNS lookup)
 	// from measurements, making latency metrics more representative of actual RPC performance
-	_, _, _ = client.BlockNumber(ctx)
+	_ = client.Warmup(ctx)
 
 	// Collect latency samples
 	for i := 0; i < samples; i++ {

@@ -16,7 +16,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -132,7 +131,7 @@ func runCompare(cfgPath, blockArg string, jsonOut bool) error {
 			// Warm-up request to establish connection (discard result)
 			// This eliminates connection setup overhead (TCP handshake, TLS negotiation, DNS lookup)
 			// from measurements, making latency metrics more representative of actual RPC performance
-			_, _, _ = client.BlockNumber(gctx)
+			_ = client.Warmup(gctx)
 
 			// Fetch block from this provider
 			block, latency, err := client.GetBlock(gctx, blockNum)

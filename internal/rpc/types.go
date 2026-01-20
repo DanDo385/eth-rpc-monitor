@@ -5,6 +5,7 @@ package rpc
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 )
 
@@ -63,21 +64,35 @@ type ParsedBlock struct {
 
 // Parsed converts a Block with hex-encoded strings to a ParsedBlock with native types.
 // This method handles all hex-to-decimal conversions and is used for display purposes.
-// Errors during parsing are silently ignored (values default to 0) since Block data
-// is assumed to be valid from the RPC endpoint.
-func (b *Block) Parsed() ParsedBlock {
+// Returns an error if any required field fails to parse, since silently
+// continuing can hide provider bugs or partial/corrupt responses.
+func (b *Block) Parsed() (ParsedBlock, error) {
 	// Parse hex-encoded numeric fields to uint64
-	// Errors are ignored as RPC responses are assumed valid
-	num, _ := ParseHexUint64(b.Number)
-	ts, _ := ParseHexUint64(b.Timestamp)
-	gasUsed, _ := ParseHexUint64(b.GasUsed)
-	gasLimit, _ := ParseHexUint64(b.GasLimit)
+	num, err := ParseHexUint64(b.Number)
+	if err != nil {
+		return ParsedBlock{}, fmt.Errorf("parse block number %q: %w", b.Number, err)
+	}
+	ts, err := ParseHexUint64(b.Timestamp)
+	if err != nil {
+		return ParsedBlock{}, fmt.Errorf("parse block timestamp %q: %w", b.Timestamp, err)
+	}
+	gasUsed, err := ParseHexUint64(b.GasUsed)
+	if err != nil {
+		return ParsedBlock{}, fmt.Errorf("parse gasUsed %q: %w", b.GasUsed, err)
+	}
+	gasLimit, err := ParseHexUint64(b.GasLimit)
+	if err != nil {
+		return ParsedBlock{}, fmt.Errorf("parse gasLimit %q: %w", b.GasLimit, err)
+	}
 
 	// BaseFeePerGas is optional (only present in post-EIP-1559 blocks)
 	// Use big.Int to handle potentially very large values
 	var baseFee *big.Int
 	if b.BaseFeePerGas != "" {
-		baseFee, _ = ParseHexBigInt(b.BaseFeePerGas)
+		baseFee, err = ParseHexBigInt(b.BaseFeePerGas)
+		if err != nil {
+			return ParsedBlock{}, fmt.Errorf("parse baseFeePerGas %q: %w", b.BaseFeePerGas, err)
+		}
 	}
 
 	return ParsedBlock{
@@ -89,5 +104,5 @@ func (b *Block) Parsed() ParsedBlock {
 		GasLimit:      gasLimit,            // Converted to uint64
 		BaseFeePerGas: baseFee,             // Converted to big.Int (nil if not present)
 		TxCount:       len(b.Transactions), // Count transactions
-	}
+	}, nil
 }

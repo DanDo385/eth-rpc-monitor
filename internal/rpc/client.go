@@ -76,7 +76,10 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	}
 
 	// Marshal request to JSON
-	body, _ := json.Marshal(req)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
+	}
 
 	var lastErr error
 	start := time.Now() // Start timing from first attempt

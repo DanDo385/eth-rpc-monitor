@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,39 +57,36 @@ type BlockJSON struct {
 //
 // Returns:
 //   - BlockJSON: Converted structure with decimal values and formatted timestamp
-func convertBlockToJSON(block *rpc.Block) BlockJSON {
-	number, _ := rpc.ParseHexUint64(block.Number)
-	timestampUnix, _ := rpc.ParseHexUint64(block.Timestamp)
-	gasUsed, _ := rpc.ParseHexUint64(block.GasUsed)
-	gasLimit, _ := rpc.ParseHexUint64(block.GasLimit)
+func convertBlockToJSON(block *rpc.Block) (BlockJSON, error) {
+	p, err := block.Parsed()
+	if err != nil {
+		return BlockJSON{}, err
+	}
 
 	// Convert timestamp to ISO 8601 format
-	timestampStr := time.Unix(int64(timestampUnix), 0).UTC().Format(time.RFC3339)
+	timestampStr := time.Unix(int64(p.Timestamp), 0).UTC().Format(time.RFC3339)
 
 	var baseFeePerGas *float64
-	if block.BaseFeePerGas != "" {
-		baseFee, _ := rpc.ParseHexBigInt(block.BaseFeePerGas)
-		if baseFee != nil {
-			// Convert wei to gwei
-			gwei := new(big.Float).Quo(
-				new(big.Float).SetInt(baseFee),
-				big.NewFloat(1e9),
-			)
-			gweiFloat, _ := gwei.Float64()
-			baseFeePerGas = &gweiFloat
-		}
+	if p.BaseFeePerGas != nil {
+		// Convert wei to gwei
+		gwei := new(big.Float).Quo(
+			new(big.Float).SetInt(p.BaseFeePerGas),
+			big.NewFloat(1e9),
+		)
+		gweiFloat, _ := gwei.Float64()
+		baseFeePerGas = &gweiFloat
 	}
 
 	return BlockJSON{
-		Number:        number,
-		Hash:          block.Hash,
-		ParentHash:    block.ParentHash,
+		Number:        p.Number,
+		Hash:          p.Hash,
+		ParentHash:    p.ParentHash,
 		Timestamp:     timestampStr,
-		GasUsed:       gasUsed,
-		GasLimit:      gasLimit,
+		GasUsed:       p.GasUsed,
+		GasLimit:      p.GasLimit,
 		BaseFeePerGas: baseFeePerGas,
 		Transactions:  block.Transactions,
-	}
+	}, nil
 }
 
 // main is the entry point for the block command.
@@ -212,7 +208,10 @@ func runInspect(cfgPath, blockArg, providerName string, jsonOut bool) error {
 	// Handle JSON output mode
 	if jsonOut {
 		// Convert to JSON-friendly format with decimal values
-		blockJSON := convertBlockToJSON(block)
+		blockJSON, err := convertBlockToJSON(block)
+		if err != nil {
+			return fmt.Errorf("parse block for JSON output: %w", err)
+		}
 		filepath, err := reports.WriteJSON(blockJSON, "block")
 		if err != nil {
 			return fmt.Errorf("failed to write JSON report: %w", err)
@@ -222,12 +221,14 @@ func runInspect(cfgPath, blockArg, providerName string, jsonOut bool) error {
 	}
 
 	// Terminal output: display formatted block information
-	printBlock(block, client.Name(), latency)
-	return nil
+	return printBlock(block, client.Name(), latency)
 }
 
-func printBlock(block *rpc.Block, provider string, latency time.Duration) {
-	p := block.Parsed()
+func printBlock(block *rpc.Block, provider string, latency time.Duration) error {
+	p, err := block.Parsed()
+	if err != nil {
+		return fmt.Errorf("parse block for display: %w", err)
+	}
 
 	fmt.Printf("\nBlock #%s\n", rpc.FormatNumber(p.Number))
 	fmt.Println("═══════════════════════════════════════════════════")
@@ -243,6 +244,7 @@ func printBlock(block *rpc.Block, provider string, latency time.Duration) {
 	fmt.Println()
 	fmt.Printf("  Provider:     %s (%dms)\n", provider, latency.Milliseconds())
 	fmt.Println()
+	return nil
 }
 
 // selectFastestProvider races all configured providers concurrently to find the fastest one
