@@ -27,6 +27,7 @@ import (
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
+	"github.com/dando385/eth-rpc-monitor/internal/util"
 )
 
 // BlockJSON is a JSON-serializable version of Block with human-readable decimal values.
@@ -198,9 +199,12 @@ func runInspect(cfgPath, blockArg, providerName string, jsonOut bool) error {
 		fmt.Fprintf(os.Stderr, "Auto-selected: %s\n\n", client.Name())
 	}
 
+	// Warm-up request to establish connection and get accurate latency
+	_ = client.Warmup(ctx)
+
 	// Fetch block data from selected provider
 	// normalizeBlockArg converts various input formats to RPC-compatible format
-	block, latency, err := client.GetBlock(ctx, normalizeBlockArg(blockArg))
+	block, latency, err := client.GetBlock(ctx, util.NormalizeBlockArg(blockArg))
 	if err != nil {
 		return fmt.Errorf("failed to fetch block: %w", err)
 	}
@@ -239,50 +243,6 @@ func printBlock(block *rpc.Block, provider string, latency time.Duration) {
 	fmt.Println()
 	fmt.Printf("  Provider:     %s (%dms)\n", provider, latency.Milliseconds())
 	fmt.Println()
-}
-
-// normalizeBlockArg converts various block identifier formats to RPC-compatible format.
-// Ethereum RPC accepts block numbers as hex strings (e.g., "0x123") or special tags
-// ("latest", "pending", "earliest"). This function handles common input variations.
-//
-// Parameters:
-//   - arg: Block identifier in various formats:
-//   - "latest", "pending", "earliest" -> returned as-is
-//   - Decimal number (e.g., "24277510") -> converted to hex ("0x172721e")
-//   - Hex number (e.g., "0x172721e") -> returned as-is
-//   - Empty string -> defaults to "latest"
-//
-// Returns:
-//   - string: RPC-compatible block identifier
-//
-// Examples:
-//   - "latest" -> "latest"
-//   - "24277510" -> "0x172721e"
-//   - "0x172721e" -> "0x172721e"
-//   - "" -> "latest"
-func normalizeBlockArg(arg string) string {
-	// Normalize input: trim whitespace and convert to lowercase
-	arg = strings.TrimSpace(strings.ToLower(arg))
-
-	// Handle special block tags
-	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
-		return "latest"
-	}
-
-	// If already hex-encoded, return as-is
-	if strings.HasPrefix(arg, "0x") {
-		return arg
-	}
-
-	// Try to parse as decimal number and convert to hex
-	num, err := strconv.ParseUint(arg, 10, 64)
-	if err != nil {
-		// Not a valid decimal number - return as-is and let RPC handle the error
-		return arg
-	}
-
-	// Convert decimal to hex with "0x" prefix
-	return fmt.Sprintf("0x%x", num)
 }
 
 // selectFastestProvider races all configured providers concurrently to find the fastest one

@@ -27,6 +27,7 @@ import (
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
+	"github.com/dando385/eth-rpc-monitor/internal/util"
 )
 
 type CompareResult struct {
@@ -113,7 +114,7 @@ func runCompare(cfgPath, blockArg string, jsonOut bool) error {
 	defer cancel()
 
 	// Normalize block argument to RPC format (e.g., "24277510" -> "0x172721e")
-	blockNum := normalizeBlockArg(blockArg)
+	blockNum := util.NormalizeBlockArg(blockArg)
 	fmt.Printf("\nFetching block %s from %d providers...\n\n", blockArg, len(cfg.Providers))
 
 	// Results array and mutex for thread-safe access
@@ -282,38 +283,4 @@ func runCompare(cfgPath, blockArg string, jsonOut bool) error {
 	fmt.Println()
 
 	return nil
-}
-
-// normalizeBlockArg converts various block identifier formats to RPC-compatible format.
-// This is the same logic as in block/main.go - it handles decimal numbers, hex numbers,
-// and special tags like "latest", "pending", "earliest".
-//
-// Parameters:
-//   - arg: Block identifier in various formats
-//
-// Returns:
-//   - string: RPC-compatible block identifier (hex string or special tag)
-func normalizeBlockArg(arg string) string {
-	// Normalize input: trim whitespace and convert to lowercase
-	arg = strings.TrimSpace(strings.ToLower(arg))
-
-	// Handle special block tags
-	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
-		return "latest"
-	}
-
-	// If already hex-encoded, return as-is
-	if strings.HasPrefix(arg, "0x") {
-		return arg
-	}
-
-	// Try to parse as decimal number and convert to hex
-	num, err := strconv.ParseUint(arg, 10, 64)
-	if err != nil {
-		// Not a valid decimal number - return as-is and let RPC handle the error
-		return arg
-	}
-
-	// Convert decimal to hex with "0x" prefix
-	return fmt.Sprintf("0x%x", num)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
+	"github.com/dando385/eth-rpc-monitor/internal/stats"
 )
 
 type HealthResult struct {
@@ -263,102 +264,23 @@ func testProvider(p config.Provider, maxRetries, samples int) HealthResult {
 	}
 
 	// Calculate percentile statistics from collected latencies
-	p50, p95, p99, max := calculateTailLatency(latencies)
+	tailLatency := stats.CalculateTailLatency(latencies)
 
 	// Log calculated percentiles (to stderr for tracing)
 	fmt.Fprintf(os.Stderr, "[%s] Calculated percentiles:\n", p.Name)
 	fmt.Fprintf(os.Stderr, "  P50: %dms, P95: %dms, P99: %dms, Max: %dms\n",
-		p50.Milliseconds(), p95.Milliseconds(), p99.Milliseconds(), max.Milliseconds())
+		tailLatency.P50.Milliseconds(), tailLatency.P95.Milliseconds(), tailLatency.P99.Milliseconds(), tailLatency.Max.Milliseconds())
 
 	return HealthResult{
 		Name:        p.Name,
 		Type:        p.Type,
 		Success:     success,
 		Total:       samples,
-		P50Latency:  p50, // Median latency
-		P95Latency:  p95, // 95th percentile (captures outliers)
-		P99Latency:  p99, // 99th percentile (worst-case scenarios)
-		MaxLatency:  max, // Absolute maximum
+		P50Latency:  tailLatency.P50, // Median latency
+		P95Latency:  tailLatency.P95, // 95th percentile (captures outliers)
+		P99Latency:  tailLatency.P99, // 99th percentile (worst-case scenarios)
+		MaxLatency:  tailLatency.Max, // Absolute maximum
 		BlockHeight: lastHeight,
 		Latencies:   latencies, // Raw samples for detailed analysis
 	}
-}
-
-// calculateTailLatency computes tail latency percentiles (P50, P95, P99, Max) from samples.
-// Tail latency metrics are critical for understanding provider performance characteristics:
-//   - P50 (median): Typical performance
-//   - P95: Captures outliers (95% of requests faster than this)
-//   - P99: Worst-case scenarios (99% of requests faster than this)
-//   - Max: Absolute worst observed latency
-//
-// Parameters:
-//   - latencies: Slice of latency measurements (may be empty)
-//
-// Returns:
-//   - p50, p95, p99, max: Calculated percentiles (all zero if latencies is empty)
-//
-// Algorithm:
-//  1. Sort latencies in ascending order
-//  2. Use nearest-rank method to calculate percentiles
-//  3. For small sample sizes, P95/P99 naturally equal Max (correct behavior)
-func calculateTailLatency(latencies []time.Duration) (p50, p95, p99, max time.Duration) {
-	// Handle empty samples (all requests failed)
-	if len(latencies) == 0 {
-		return 0, 0, 0, 0
-	}
-
-	// Sort latencies in ascending order for percentile calculation
-	// Create a copy to avoid mutating the original slice
-	sorted := make([]time.Duration, len(latencies))
-	copy(sorted, latencies)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-
-	// Calculate percentiles from sorted samples using nearest-rank method
-	n := len(sorted)
-	p50 = percentile(sorted, n, 0.50) // Median
-	p95 = percentile(sorted, n, 0.95) // 95th percentile
-	p99 = percentile(sorted, n, 0.99) // 99th percentile
-	max = sorted[n-1]                 // Maximum is the last element after sorting
-
-	return p50, p95, p99, max
-}
-
-// percentile returns the value at the given percentile using the nearest-rank method.
-// This method ensures that with small sample sizes, high percentiles (P95, P99) correctly
-// equal the maximum value, which is the expected behavior.
-//
-// Parameters:
-//   - sorted: Pre-sorted slice of latencies (ascending order)
-//   - n: Length of sorted slice
-//   - p: Percentile as decimal (e.g., 0.95 for 95th percentile)
-//
-// Returns:
-//   - time.Duration: Value at the requested percentile
-//
-// Formula: index = ceil(n * p) - 1, clamped to valid range [0, n-1]
-//
-// Examples with 3 samples [a, b, c] (sorted):
-//   - P50: ceil(3 * 0.50) - 1 = ceil(1.5) - 1 = 2 - 1 = 1 -> sorted[1] (middle value)
-//   - P95: ceil(3 * 0.95) - 1 = ceil(2.85) - 1 = 3 - 1 = 2 -> sorted[2] (max value)
-//   - P99: ceil(3 * 0.99) - 1 = ceil(2.97) - 1 = 3 - 1 = 2 -> sorted[2] (max value)
-//
-// This ensures P95/P99 = Max for small sample sizes, which is correct.
-func percentile(sorted []time.Duration, n int, p float64) time.Duration {
-	if n == 0 {
-		return 0
-	}
-
-	// Nearest-rank method: ceil(n * p) - 1
-	// This rounds up to ensure we capture the appropriate percentile
-	index := int(math.Ceil(float64(n)*p)) - 1
-
-	// Clamp index to valid range [0, n-1]
-	if index >= n {
-		index = n - 1
-	}
-	if index < 0 {
-		index = 0
-	}
-
-	return sorted[index]
 }

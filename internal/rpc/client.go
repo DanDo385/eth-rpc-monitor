@@ -217,3 +217,9 @@ func (c *Client) GetBlock(ctx context.Context, blockNum string) (*Block, time.Du
 
 	return &block, latency, nil
 }
+
+// Warmup performs a single BlockNumber request to establish connection.
+func (c *Client) Warmup(ctx context.Context) error {
+	_, _, err := c.BlockNumber(ctx)
+	return err
+}
