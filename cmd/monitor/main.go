@@ -111,7 +111,7 @@ func printBlock(block *rpc.Block, provider string, latency time.Duration) {
 	fmt.Printf("\nBlock #%s\n", rpc.FormatNumber(p.Number))
 	fmt.Println("═══════════════════════════════════════════════════")
 	fmt.Printf("  Hash:         %s\n", p.Hash)
-	fmt.Printf("  Parent:       %s...\n", p.ParentHash[:14])
+	fmt.Printf("  Parent:       %s\n", p.ParentHash)
 	fmt.Printf("  Timestamp:    %s\n", rpc.FormatTimestamp(p.Timestamp))
 	fmt.Printf("  Gas:          %s / %s (%.1f%%)\n",
 		rpc.FormatNumber(p.GasUsed),
