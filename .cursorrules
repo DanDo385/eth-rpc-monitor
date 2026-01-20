@@ -26,11 +26,15 @@ Target: Portfolio project demonstrating Go proficiency, understanding of Ethereu
 
 ## Architecture
 ```
-cmd/monitor/
-├── main.go       # Root command + block inspector
-├── health.go     # Provider health check
-├── compare.go    # Cross-provider comparison
-└── watch.go      # Continuous monitoring
+cmd/
+├── block/
+│   └── main.go   # Block inspector (fetch and display blocks)
+├── compare/
+│   └── main.go   # Cross-provider comparison
+├── health/
+│   └── main.go   # Provider health check
+└── watch/
+    └── main.go   # Continuous monitoring
 
 internal/
 ├── config/
@@ -46,10 +50,10 @@ config/
 ## Commands
 | Command | Description |
 |---------|-------------|
-| `monitor [block]` | Inspect block (default: latest, auto-selects fastest provider) |
-| `monitor health` | Test all providers, show latency stats |
-| `monitor compare [block]` | Fetch same block from all providers, detect mismatches |
-| `monitor watch` | Continuous monitoring with refresh interval |
+| `block [block]` | Inspect block (default: latest, auto-selects fastest provider) |
+| `health` | Test all providers, show latency stats |
+| `compare [block]` | Fetch same block from all providers, detect mismatches |
+| `watch` | Continuous monitoring with refresh interval |
 
 ## Configuration
 
@@ -104,7 +108,7 @@ Block #19,234,567
 ### JSON (`--json` flag)
 Machine-readable. No colors, no formatting, pipe-friendly.
 ```bash
-./monitor latest --json | jq '.hash'
+./block latest --json | jq '.hash'
 ```
 
 ## Code Patterns
@@ -146,10 +150,13 @@ func ParseHexUint64(hex string) (uint64, error) {
 
 ## Testing After Every Change
 ```bash
-go build -o monitor ./cmd/monitor
-./monitor --help
-./monitor health
-./monitor compare
-./monitor latest
-./monitor latest --json | jq .
+go build -o block ./cmd/block
+go build -o compare ./cmd/compare
+go build -o health ./cmd/health
+go build -o watch ./cmd/watch
+./block latest
+./block latest --json | jq .
+./health
+./compare
+./watch
 ```

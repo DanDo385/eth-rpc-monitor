@@ -1,4 +1,7 @@
 # Binaries
+/block
+/compare
+/health
 /monitor
 bin/
 *.exe
@@ -30,6 +33,9 @@ Thumbs.db
 # Local config with API keys (use providers.yaml.example as template)
 config/providers.local.yaml
 config/providers.yaml
+
+# Environment variables
+.env
 
 # Reports
 reports/

@@ -44,19 +44,19 @@ Block N arrives → Opportunity detected → Execute trade
 View detailed block information with automatic provider selection:
 
 ```bash
-monitor                    # Latest block from fastest provider
-monitor 19000000          # Specific block by number
-monitor 0x121eac0         # Specific block by hex
-monitor latest --provider alchemy
-monitor latest --json     # Raw JSON output
+block                    # Latest block from fastest provider
+block 19000000          # Specific block by number
+block 0x121eac0         # Specific block by hex
+block latest --provider alchemy
+block latest --json     # Raw JSON output
 ```
 
 ### 2. Health Check
 Test all providers and compare tail latency performance:
 
 ```bash
-monitor health              # Uses default samples from config (30)
-monitor health --samples 10 # Override with custom sample count
+health              # Uses default samples from config (30)
+health --samples 10 # Override with custom sample count
 ```
 
 Output:
@@ -83,9 +83,9 @@ publicnode     public     100%    134ms    178ms    245ms    389ms   21234567
 Compare block hashes and heights across providers to detect chain splits, stale caches, or sync lag:
 
 ```bash
-monitor compare              # Compare latest block
-monitor compare latest       # Same as above
-monitor compare 19000000     # Compare specific block
+compare              # Compare latest block
+compare latest       # Same as above
+compare 19000000     # Compare specific block
 ```
 
 Output:
@@ -121,8 +121,8 @@ This may indicate stale caches, chain reorganization, or incorrect data.
 Watch all providers in real-time with automatic refresh:
 
 ```bash
-monitor watch                # Uses default interval from config (30s)
-monitor watch --interval 10s # Override with custom interval
+monitor                # Uses default interval from config (30s)
+monitor --interval 10s # Override with custom interval
 ```
 
 Output updates continuously showing:
@@ -143,6 +143,9 @@ Press Ctrl+C to exit gracefully.
 ```bash
 git clone https://github.com/dmagro/eth-rpc-monitor
 cd eth-rpc-monitor
+go build -o block ./cmd/block
+go build -o compare ./cmd/compare
+go build -o health ./cmd/health
 go build -o monitor ./cmd/monitor
 ```
 
@@ -155,7 +158,7 @@ defaults:
   timeout: 10s
   max_retries: 3
   health_samples: 30      # Default samples for health command
-  watch_interval: 30s     # Default refresh interval for watch command
+  watch_interval: 30s     # Default refresh interval for monitor command
 
 providers:
   # Alchemy – managed public RPC
@@ -208,19 +211,19 @@ The config automatically expands environment variables using `os.ExpandEnv()`.
 
 ### Quick health check before deployment
 ```bash
-monitor health --samples 10
+health --samples 10
 ```
 Run before deploying trading systems to verify all RPC endpoints are responsive.
 
 ### Monitor block production during high activity
 ```bash
-monitor watch
+monitor
 ```
-Watch all providers continuously with automatic refresh. Useful during network congestion or major events.
+Monitor all providers continuously with automatic refresh. Useful during network congestion or major events.
 
 ### Verify historical data consistency
 ```bash
-monitor compare 19000000
+compare 19000000
 ```
 Ensure all providers agree on historical block data (important for reorgs).
 
@@ -228,8 +231,8 @@ Ensure all providers agree on historical block data (important for reorgs).
 ```bash
 #!/bin/bash
 # Run every 5 minutes via cron
-monitor health --samples 3 > /var/log/rpc-health.log
-monitor compare latest >> /var/log/rpc-health.log
+health --samples 3 > /var/log/rpc-health.log
+compare latest >> /var/log/rpc-health.log
 ```
 
 ## Understanding the Output
@@ -274,11 +277,15 @@ Block #21,234,567
 This tool follows a simple, maintainable design:
 
 ```
-cmd/monitor/
-├── main.go      # Main CLI and block inspector
-├── health.go    # Health check command (tail latency metrics)
-├── compare.go   # Block comparison command (fork detection)
-└── watch.go     # Continuous monitoring command
+cmd/
+├── block/
+│   └── main.go      # Block inspector (fetch and display blocks)
+├── compare/
+│   └── main.go      # Block comparison (fork detection)
+├── health/
+│   └── main.go      # Health check (tail latency metrics)
+└── monitor/
+    └── main.go      # Continuous monitoring
 
 internal/
 ├── config/
@@ -303,14 +310,14 @@ config/
 Check that `config/providers.yaml` includes a provider with that exact name.
 
 ### "failed to read config: no such file"
-Specify config path: `monitor --config /path/to/providers.yaml`
+Specify config path: `block --config /path/to/providers.yaml`
 
 ### "defaults.timeout is required"
 Add `defaults` section to `providers.yaml` with required fields:
 - `timeout`: Request timeout (e.g., `10s`)
 - `max_retries`: Retry count (e.g., `3`)
 - `health_samples`: Default samples for health command (e.g., `30`)
-- `watch_interval`: Default refresh interval for watch (e.g., `30s`)
+- `watch_interval`: Default refresh interval for monitor (e.g., `30s`)
 
 ### All providers showing high latency
 - Check your internet connection

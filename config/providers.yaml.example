@@ -6,15 +6,17 @@ defaults:
 
 providers:
   # Alchemy – managed public RPC
+  # Set ALCHEMY_API_KEY in your .env file
   - name: alchemy
-    url: https://eth-mainnet.g.alchemy.com/v2/0SaugUrj75N_bDS-KCTF2G8Yltuzr-f2
+    url: https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}
     type: public
     # enterprise example:
     # url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
 
   # Infura – ConsenSys managed public RPC
+  # Set INFURA_API_KEY in your .env file
   - name: infura
-    url: https://mainnet.infura.io/v3/b352245d9e3640288dd3bc8312cb4c69
+    url: https://mainnet.infura.io/v3/${INFURA_API_KEY}
     type: public
 
   # LlamaNodes – community public RPC
@@ -37,4 +39,4 @@ providers:
   # - name: alchemy-enterprise
   #   url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
   #   type: enterprise
-  #   timeout: 15s
+  #   timeout: 10s

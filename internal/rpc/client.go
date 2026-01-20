@@ -13,7 +13,7 @@ import (
 type Client struct {
 	name       string
 	url        string
-	httpClient *http.Client
+	httpClient *http.Client 
 	maxRetries int
 }
 

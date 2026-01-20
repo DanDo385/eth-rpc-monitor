@@ -28,22 +28,22 @@ type Defaults struct {
 	WatchInterval time.Duration `yaml:"watch_interval"`
 }
 
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+func Load(path string) (*Config, error) { // load the config
+	data, err := os.ReadFile(path) // read the config file
+	if err != nil { // 
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
 	// Expand environment variables
 	expanded := os.ExpandEnv(string(data))
 
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+	var cfg Config 
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil { // parse the config
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 
 	// Validate required fields - NO hardcoded fallbacks
-	if cfg.Defaults.Timeout == 0 {
+	if cfg.Defaults.Timeout == 0 { 
 		return nil, fmt.Errorf("defaults.timeout is required")
 	}
 	if cfg.Defaults.MaxRetries < 0 {
