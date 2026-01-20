@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -34,6 +35,64 @@ type Defaults struct {
 	MaxRetries    int           `yaml:"max_retries"`    // Maximum retry attempts (0 = no retries)
 	HealthSamples int           `yaml:"health_samples"` // Number of samples for health command (e.g., 30)
 	WatchInterval time.Duration `yaml:"watch_interval"` // Refresh interval for monitor command (e.g., "30s")
+}
+
+// Validate validates the configuration and applies defaults where appropriate.
+// It may emit warnings (to stderr) for suspicious values but does not fail on warnings.
+func (c *Config) Validate() error {
+	// Validate required default fields - strict validation, no fallbacks
+	if c.Defaults.Timeout == 0 {
+		return fmt.Errorf("defaults.timeout is required")
+	}
+	if c.Defaults.MaxRetries < 0 {
+		return fmt.Errorf("defaults.max_retries must be >= 0")
+	}
+	if c.Defaults.HealthSamples <= 0 {
+		return fmt.Errorf("defaults.health_samples is required and must be > 0")
+	}
+	if c.Defaults.WatchInterval == 0 {
+		return fmt.Errorf("defaults.watch_interval is required")
+	}
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("at least one provider is required")
+	}
+
+	warnTimeout := func(scope string, d time.Duration) {
+		const low = 500 * time.Millisecond
+		const high = 2 * time.Minute
+		if d > 0 && d < low {
+			fmt.Fprintf(os.Stderr, "Warning: %s timeout is very low (%s); requests may fail under normal network jitter\n", scope, d)
+		}
+		if d > high {
+			fmt.Fprintf(os.Stderr, "Warning: %s timeout is very high (%s); failures may take a long time to surface\n", scope, d)
+		}
+	}
+	warnTimeout("defaults", c.Defaults.Timeout)
+
+	// Apply default timeout to providers that don't specify one and validate URLs.
+	for i := range c.Providers {
+		if c.Providers[i].Timeout == 0 {
+			c.Providers[i].Timeout = c.Defaults.Timeout
+		}
+		if c.Providers[i].URL == "" {
+			return fmt.Errorf("provider %s: url is required", c.Providers[i].Name)
+		}
+
+		u, err := url.Parse(c.Providers[i].URL)
+		if err != nil {
+			return fmt.Errorf("provider %s: invalid url: %w", c.Providers[i].Name, err)
+		}
+		if u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("provider %s: invalid url (missing scheme or host)", c.Providers[i].Name)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("provider %s: invalid url scheme %q (expected http or https)", c.Providers[i].Name, u.Scheme)
+		}
+
+		warnTimeout(fmt.Sprintf("provider %s", c.Providers[i].Name), c.Providers[i].Timeout)
+	}
+
+	return nil
 }
 
 // Load reads and parses a YAML configuration file, expanding environment variables
@@ -76,32 +135,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// Validate required default fields - strict validation, no fallbacks
-	if cfg.Defaults.Timeout == 0 {
-		return nil, fmt.Errorf("defaults.timeout is required")
-	}
-	if cfg.Defaults.MaxRetries < 0 {
-		return nil, fmt.Errorf("defaults.max_retries must be >= 0")
-	}
-	if cfg.Defaults.HealthSamples <= 0 {
-		return nil, fmt.Errorf("defaults.health_samples is required and must be > 0")
-	}
-	if cfg.Defaults.WatchInterval == 0 {
-		return nil, fmt.Errorf("defaults.watch_interval is required")
-	}
-	if len(cfg.Providers) == 0 {
-		return nil, fmt.Errorf("at least one provider is required")
-	}
-
-	// Apply default timeout to providers that don't specify one
-	for i := range cfg.Providers {
-		if cfg.Providers[i].Timeout == 0 {
-			cfg.Providers[i].Timeout = cfg.Defaults.Timeout
-		}
-		// Validate provider has required fields
-		if cfg.Providers[i].URL == "" {
-			return nil, fmt.Errorf("provider %s: url is required", cfg.Providers[i].Name)
-		}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil

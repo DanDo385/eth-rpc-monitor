@@ -76,7 +76,10 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	}
 
 	// Marshal request to JSON
-	body, _ := json.Marshal(req)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
 
 	var lastErr error
 	start := time.Now() // Start timing from first attempt
@@ -188,6 +191,13 @@ func (c *Client) BlockNumber(ctx context.Context) (uint64, time.Duration, error)
 	return num, latency, err
 }
 
+// Warmup performs a lightweight request to establish a connection before timing-sensitive calls.
+// It mirrors the warm-up behavior used in other commands to avoid measuring connection setup.
+func (c *Client) Warmup(ctx context.Context) error {
+	_, _, err := c.BlockNumber(ctx)
+	return err
+}
+
 // GetBlock fetches a full block by block number or tag.
 // The blockNum parameter can be:
 //   - "latest": Most recent block
@@ -216,10 +226,4 @@ func (c *Client) GetBlock(ctx context.Context, blockNum string) (*Block, time.Du
 	}
 
 	return &block, latency, nil
-}
-
-// Warmup performs a single BlockNumber request to establish connection.
-func (c *Client) Warmup(ctx context.Context) error {
-	_, _, err := c.BlockNumber(ctx)
-	return err
 }

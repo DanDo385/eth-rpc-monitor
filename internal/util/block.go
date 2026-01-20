@@ -8,17 +8,14 @@ import (
 )
 
 // NormalizeBlockArg converts block identifiers (decimal, hex, or tag) to RPC format.
-// Returns "latest" for empty/invalid input, hex string for numbers, passthrough for tags.
+// Returns "latest" for "latest", "pending", "earliest", or empty input.
 func NormalizeBlockArg(arg string) string {
 	// Normalize input: trim whitespace and convert to lowercase
 	arg = strings.TrimSpace(strings.ToLower(arg))
 
 	// Handle special block tags
 	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
-		if arg == "" {
-			return "latest"
-		}
-		return arg
+		return "latest"
 	}
 
 	// If already hex-encoded, return as-is
