@@ -48,8 +48,14 @@ block                    # Latest block from fastest provider
 block 19000000          # Specific block by number
 block 0x121eac0         # Specific block by hex
 block latest --provider alchemy
-block latest --json     # Raw JSON output
+block latest --json     # JSON report to reports/block-{timestamp}.json
 ```
+
+**JSON output features:**
+- Decimal values (not hex) for easier parsing
+- ISO 8601 timestamps (e.g., "2026-01-20T17:02:23Z")
+- Base fee converted to gwei (not wei)
+- All numeric fields as native types
 
 ### 2. Health Check
 Test all providers and compare tail latency performance:
@@ -57,7 +63,14 @@ Test all providers and compare tail latency performance:
 ```bash
 health              # Uses default samples from config (30)
 health --samples 10 # Override with custom sample count
+health --json       # JSON report to reports/health-{timestamp}.json
 ```
+
+**Features:**
+- Warm-up request eliminates connection setup overhead from measurements
+- Individual latency samples printed to stderr for tracing
+- Percentile calculation uses nearest-rank method (ensures P95/P99 = Max for small samples)
+- Block height mismatch detection (groups providers by height)
 
 Output:
 ```
@@ -86,7 +99,14 @@ Compare block hashes and heights across providers to detect chain splits, stale 
 compare              # Compare latest block
 compare latest       # Same as above
 compare 19000000     # Compare specific block
+compare latest --json # JSON report to reports/compare-{timestamp}.json
 ```
+
+**Features:**
+- Warm-up request for accurate latency measurements
+- Concurrent fetching using errgroup for speed
+- Groups providers by hash/height to show consensus
+- Detects both height mismatches (sync lag) and hash mismatches (forks/stale data)
 
 Output:
 ```
@@ -123,6 +143,7 @@ Watch all providers in real-time with automatic refresh:
 ```bash
 monitor                # Uses default interval from config (30s)
 monitor --interval 10s # Override with custom interval
+monitor --json         # Write JSON report on exit (Ctrl+C)
 ```
 
 Output updates continuously showing:
@@ -130,7 +151,11 @@ Output updates continuously showing:
 - Latency for each request
 - Lag vs highest observed block (shows which providers are behind)
 
-Press Ctrl+C to exit gracefully.
+**Features:**
+- Real-time dashboard with screen clearing (ANSI escape codes)
+- Graceful shutdown on Ctrl+C with signal handling
+- Optional JSON report written on exit with final snapshot
+- Concurrent provider queries for fast refresh cycles
 
 ## Installation
 
@@ -274,7 +299,7 @@ Block #21,234,567
 
 ## Architecture
 
-This tool follows a simple, maintainable design:
+This tool follows a simple, maintainable design with extensive documentation:
 
 ```
 cmd/
@@ -285,14 +310,19 @@ cmd/
 ├── health/
 │   └── main.go      # Health check (tail latency metrics)
 └── monitor/
-    └── main.go      # Continuous monitoring
+    └── main.go      # Continuous monitoring (real-time dashboard)
 
 internal/
 ├── config/
 │   └── config.go      # YAML configuration loader with env expansion
+├── env/
+│   └── env.go        # .env file loader for sensitive config
+├── reports/
+│   └── reports.go    # JSON report generation (timestamped files)
 └── rpc/
-    ├── types.go       # Block and response types
-    └── client.go      # HTTP JSON-RPC client with retry
+    ├── client.go     # HTTP JSON-RPC client with retry, latency measurement
+    ├── format.go     # Hex parsing, number formatting, unit conversion
+    └── types.go      # Block and response types
 
 config/
 └── providers.yaml     # Provider configuration (single source of truth)
@@ -303,6 +333,9 @@ config/
 - Simple exponential backoff retry (no circuit breakers)
 - Configuration via YAML with env variable expansion
 - Pure functions for parsing and formatting
+- Extensive inline documentation for maintainability
+- Concurrent execution using `golang.org/x/sync/errgroup`
+- Warm-up requests in health/compare to eliminate connection overhead
 
 ## Troubleshooting
 
@@ -374,11 +407,21 @@ This is a focused tool. Contributions should maintain simplicity:
 
 MIT License - see LICENSE file for details
 
+## Code Documentation
+
+This project includes extensive inline documentation:
+- **Package-level docs**: Every package explains its purpose and usage
+- **Function docs**: All exported functions include parameter/return documentation
+- **Algorithm explanations**: Complex logic (percentiles, provider selection) is documented
+- **Type documentation**: All structs and types have explanatory comments
+
+The codebase is designed to be self-documenting and maintainable.
+
 ## Support
 
 For issues or questions:
 - GitHub Issues: https://github.com/dmagro/eth-rpc-monitor/issues
-- Read the code: It's intentionally simple and well-commented
+- Read the code: It's intentionally simple and extensively commented
 
 ## Acknowledgments
 

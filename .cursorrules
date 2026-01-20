@@ -30,30 +30,37 @@ cmd/
 ├── block/
 │   └── main.go   # Block inspector (fetch and display blocks)
 ├── compare/
-│   └── main.go   # Cross-provider comparison
+│   └── main.go   # Cross-provider comparison (fork detection)
 ├── health/
-│   └── main.go   # Provider health check
-└── watch/
-    └── main.go   # Continuous monitoring
+│   └── main.go   # Provider health check (tail latency metrics)
+└── monitor/
+    └── main.go   # Continuous monitoring (real-time dashboard)
 
 internal/
 ├── config/
-│   └── config.go # YAML loading, env var expansion
+│   └── config.go    # YAML loading, env var expansion, validation
+├── env/
+│   └── env.go       # .env file loader for sensitive config
+├── reports/
+│   └── reports.go   # JSON report generation (timestamped files)
 └── rpc/
-    ├── client.go # HTTP client with optional retry
-    └── types.go  # Block, Request, Response structs + hex parsing
+    ├── client.go    # HTTP client with retry, latency measurement
+    ├── format.go    # Hex parsing, number formatting, unit conversion
+    └── types.go     # Block, Request, Response structs
     
 config/
-└── providers.yaml # Single source of truth for all config
+└── providers.yaml   # Single source of truth for all config
 ```
 
 ## Commands
 | Command | Description |
 |---------|-------------|
 | `block [block]` | Inspect block (default: latest, auto-selects fastest provider) |
-| `health` | Test all providers, show latency stats |
+| `health` | Test all providers, show tail latency stats (P50/P95/P99/Max) |
 | `compare [block]` | Fetch same block from all providers, detect mismatches |
-| `watch` | Continuous monitoring with refresh interval |
+| `monitor` | Continuous monitoring with refresh interval (real-time dashboard) |
+
+All commands support `--json` flag to output JSON reports to `reports/` directory.
 
 ## Configuration
 
@@ -106,24 +113,52 @@ Block #19,234,567
 ```
 
 ### JSON (`--json` flag)
-Machine-readable. No colors, no formatting, pipe-friendly.
+Machine-readable reports written to `reports/` directory with timestamped filenames.
+Format: `{command}-{YYYYMMDD-HHMMSS}.json`
+
 ```bash
-./block latest --json | jq '.hash'
+./block latest --json              # Writes reports/block-20260120-124236.json
+./health --json                    # Writes reports/health-20260120-124251.json
+./compare latest --json            # Writes reports/compare-20260120-124628.json
+./monitor --json                   # Writes reports/monitor-{timestamp}.json on exit (Ctrl+C)
 ```
+
+JSON output includes:
+- **block**: Decimal values (not hex), ISO 8601 timestamps, gwei for baseFeePerGas
+- **health**: Raw latency samples, percentile calculations, block height mismatches
+- **compare**: Grouped results by hash/height, mismatch detection
+- **monitor**: Final snapshot with lag calculations
 
 ## Code Patterns
 
-### Provider Selection
-Race all providers, return first successful response:
+### Concurrency
+Use `golang.org/x/sync/errgroup` for concurrent provider calls:
 ```go
-resultCh := make(chan result, len(providers))
+g, gctx := errgroup.WithContext(ctx)
 for _, p := range providers {
-    go func(p Provider) {
-        // try provider, send to channel if success
-    }(p)
+    p := p // capture loop variable
+    g.Go(func() error {
+        // Concurrent work with context cancellation
+        return nil
+    })
 }
-// Return first result from channel
+if err := g.Wait(); err != nil {
+    return err
+}
 ```
+
+### Provider Selection (block command)
+Race all providers concurrently, select fastest that's on latest block:
+- Query all providers for `eth_blockNumber` concurrently
+- Find highest block number (most up-to-date)
+- Among providers on latest block, select fastest by latency
+- Ensures both speed and correctness (no stale data)
+
+### Warm-up Requests
+Both `health` and `compare` commands perform a warm-up request before measurements:
+- Eliminates connection setup overhead (TCP handshake, TLS negotiation, DNS lookup)
+- Makes latency metrics more representative of actual RPC performance
+- Warm-up result is discarded, only actual measurements are recorded
 
 ### Error Handling
 - Wrap errors: `fmt.Errorf("context: %w", err)`
@@ -131,32 +166,64 @@ for _, p := range providers {
 - In JSON mode, errors to stderr only
 
 ### Hex Parsing
-All Ethereum values are hex. Parse with:
+All Ethereum values are hex. Use utility functions from `internal/rpc/format.go`:
+- `ParseHexUint64(hex string) (uint64, error)` - For values that fit in 64 bits
+- `ParseHexBigInt(hex string) (*big.Int, error)` - For arbitrarily large values (e.g., baseFeePerGas)
+
+### Percentile Calculation (health command)
+Use nearest-rank method for correct percentile calculation:
 ```go
-func ParseHexUint64(hex string) (uint64, error) {
-    hex = strings.TrimPrefix(hex, "0x")
-    val := new(big.Int)
-    val.SetString(hex, 16)
-    return val.Uint64(), nil
-}
+index := int(math.Ceil(float64(n)*p)) - 1
+// Ensures P95/P99 = Max for small sample sizes (correct behavior)
 ```
 
-## Do NOT
+### JSON Report Generation
+Use `internal/reports.WriteJSON(data, prefix)` for all JSON output:
+- Creates `reports/` directory if needed
+- Generates timestamped filenames: `{prefix}-{YYYYMMDD-HHMMSS}.json`
+- Pretty-printed JSON with 2-space indentation
+
+## Code Quality Standards
+
+### Documentation
+- **All packages** must have package-level documentation explaining purpose
+- **All exported functions** must have function-level documentation with:
+  - Description of what the function does
+  - Parameters (name, type, description)
+  - Return values (type, description)
+  - Examples where helpful
+- **Complex logic** must have inline comments explaining the algorithm
+- **Type definitions** must have comments explaining purpose and field meanings
+
+### Do NOT
 - Use `go-ethereum` or `ethclient`
 - Add web UI or persistence
 - Hardcode config values in Go (use YAML)
-- Mix stdout/stderr in JSON mode
+- Mix stdout/stderr in JSON mode (errors to stderr, JSON to stdout)
 - Compare block hashes from different heights
+- Skip error handling (always check and wrap errors)
 
 ## Testing After Every Change
 ```bash
+# Build all commands
 go build -o block ./cmd/block
 go build -o compare ./cmd/compare
 go build -o health ./cmd/health
-go build -o watch ./cmd/watch
+go build -o monitor ./cmd/monitor
+
+# Test each command
 ./block latest
-./block latest --json | jq .
-./health
-./compare
-./watch
+./block latest --json                    # Check reports/block-*.json
+./health --samples 5                      # Quick health check
+./health --json                           # Check reports/health-*.json
+./compare latest                          # Compare all providers
+./compare latest --json                   # Check reports/compare-*.json
+./monitor --interval 5s                   # Test monitoring (Ctrl+C to exit)
+./monitor --json                          # Test with JSON report on exit
 ```
+
+Verify:
+- All builds succeed without errors
+- JSON reports are written to `reports/` directory
+- Terminal output is properly formatted
+- Error handling works correctly
