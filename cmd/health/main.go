@@ -14,10 +14,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dmagro/eth-rpc-monitor/internal/config"
-	"github.com/dmagro/eth-rpc-monitor/internal/env"
-	"github.com/dmagro/eth-rpc-monitor/internal/reports"
-	"github.com/dmagro/eth-rpc-monitor/internal/rpc"
+	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/env"
+	"github.com/dando385/eth-rpc-monitor/internal/reports"
+	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
 type HealthResult struct {

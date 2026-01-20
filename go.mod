@@ -1,4 +1,4 @@
-module github.com/dmagro/eth-rpc-monitor
+module github.com/dando385/eth-rpc-monitor
 
 go 1.24.0
 
