@@ -17,13 +17,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
+	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 	"github.com/dando385/eth-rpc-monitor/internal/util"
@@ -116,46 +114,37 @@ func runCompare(cfgPath, blockArg string, jsonOut bool) error {
 	blockNum := util.NormalizeBlockArg(blockArg)
 	fmt.Printf("\nFetching block %s from %d providers...\n\n", blockArg, len(cfg.Providers))
 
-	// Results array and mutex for thread-safe access
-	results := make([]CompareResult, len(cfg.Providers))
-	var mu sync.Mutex
+	exec := provider.ExecuteAll(ctx, cfg.Providers, func(ctx context.Context, p config.Provider) (CompareResult, error) {
+		client := rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
 
-	// Use errgroup for concurrent block fetching with context cancellation
-	g, gctx := errgroup.WithContext(ctx)
-	for i, p := range cfg.Providers {
-		i, p := i, p // Capture loop variables for goroutine
-		g.Go(func() error {
-			// Create RPC client for this provider
-			client := rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
+		// Warm-up request to establish connection (discard result)
+		_ = client.Warmup(ctx)
 
-			// Warm-up request to establish connection (discard result)
-			// This eliminates connection setup overhead (TCP handshake, TLS negotiation, DNS lookup)
-			// from measurements, making latency metrics more representative of actual RPC performance
-			_ = client.Warmup(gctx)
+		block, latency, err := client.GetBlock(ctx, blockNum)
+		if err != nil {
+			return CompareResult{Provider: p.Name, Latency: latency, Error: err}, err
+		}
+		if block == nil {
+			return CompareResult{Provider: p.Name, Latency: latency, Error: fmt.Errorf("empty block response")}, fmt.Errorf("empty block response")
+		}
 
-			// Fetch block from this provider
-			block, latency, err := client.GetBlock(gctx, blockNum)
+		height, err := rpc.ParseHexUint64(block.Number)
+		if err != nil {
+			return CompareResult{Provider: p.Name, Latency: latency, Error: fmt.Errorf("parse block number %q: %w", block.Number, err)}, err
+		}
 
-			// Build result structure
-			r := CompareResult{Provider: p.Name, Latency: latency, Error: err}
-			if err == nil && block != nil {
-				// Extract hash and height from successful response
-				r.Hash = block.Hash
-				r.Height, _ = rpc.ParseHexUint64(block.Number)
-			}
+		return CompareResult{
+			Provider: p.Name,
+			Hash:     block.Hash,
+			Height:   height,
+			Latency:  latency,
+			Error:    nil,
+		}, nil
+	})
 
-			// Thread-safely store result
-			mu.Lock()
-			results[i] = r
-			mu.Unlock()
-
-			return nil // Don't propagate errors, we track them in the result
-		})
-	}
-
-	// Wait for all concurrent fetches to complete
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("error fetching blocks: %w", err)
+	results := make([]CompareResult, len(exec))
+	for i, r := range exec {
+		results[i] = r.Value
 	}
 
 	// Group results by hash and height to detect mismatches

@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
+	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 	"github.com/dando385/eth-rpc-monitor/internal/stats"
@@ -103,30 +101,13 @@ func runHealth(cfgPath string, samplesOverride int, jsonOut bool) error {
 
 	fmt.Printf("\nTesting %d providers with %d samples each...\n\n", len(cfg.Providers), samples)
 
-	// Results array and mutex for thread-safe access
-	results := make([]HealthResult, len(cfg.Providers))
-	var mu sync.Mutex
+	exec := provider.ExecuteAll(context.Background(), cfg.Providers, func(_ context.Context, p config.Provider) (HealthResult, error) {
+		return testProvider(p, cfg.Defaults.MaxRetries, samples), nil
+	})
 
-	// Use errgroup for concurrent provider testing
-	g, _ := errgroup.WithContext(context.Background())
-	for i, p := range cfg.Providers {
-		i, p := i, p // Capture loop variables for goroutine
-		g.Go(func() error {
-			// Test this provider with specified number of samples
-			result := testProvider(p, cfg.Defaults.MaxRetries, samples)
-
-			// Thread-safely store result
-			mu.Lock()
-			results[i] = result
-			mu.Unlock()
-
-			return nil // Don't propagate errors, we track them in the result
-		})
-	}
-
-	// Wait for all concurrent tests to complete
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("error testing providers: %w", err)
+	results := make([]HealthResult, len(exec))
+	for i, r := range exec {
+		results[i] = r.Value
 	}
 
 	// Prepare JSON report if requested

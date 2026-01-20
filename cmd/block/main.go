@@ -17,13 +17,11 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
+	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 	"github.com/dando385/eth-rpc-monitor/internal/util"
@@ -274,40 +272,18 @@ func selectFastestProvider(ctx context.Context, cfg *config.Config) (*rpc.Client
 		latency  time.Duration // Response latency
 	}
 
-	// Thread-safe collection of results
-	var mu sync.Mutex
-	results := make([]result, 0, len(cfg.Providers))
+	exec := provider.ExecuteAll(ctx, cfg.Providers, func(ctx context.Context, p config.Provider) (result, error) {
+		client := rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
+		blockNum, latency, err := client.BlockNumber(ctx)
+		return result{client: client, blockNum: blockNum, latency: latency}, err
+	})
 
-	// Use errgroup for concurrent provider queries with context cancellation
-	g, gctx := errgroup.WithContext(ctx)
-	for _, p := range cfg.Providers {
-		p := p // Capture loop variable for goroutine
-		g.Go(func() error {
-			// Create client and query block number
-			client := rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
-			blockNum, latency, err := client.BlockNumber(gctx)
-
-			// Ignore errors - just skip providers that fail
-			// We'll check if we have any successful providers later
-			if err != nil {
-				return nil
-			}
-
-			// Thread-safely append result
-			mu.Lock()
-			results = append(results, result{
-				client:   client,
-				blockNum: blockNum,
-				latency:  latency,
-			})
-			mu.Unlock()
-			return nil
-		})
-	}
-
-	// Wait for all concurrent queries to complete
-	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("error selecting provider: %w", err)
+	results := make([]result, 0, len(exec))
+	for _, r := range exec {
+		if r.Err != nil {
+			continue
+		}
+		results = append(results, r.Value)
 	}
 
 	// Ensure at least one provider responded

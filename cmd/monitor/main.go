@@ -18,14 +18,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
+	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
@@ -97,6 +95,9 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 	if err != nil {
 		return err
 	}
+
+	// Create reusable RPC clients for long-running polling.
+	pool := rpc.NewClientPool()
 
 	// Determine refresh interval: use override if provided, otherwise use config default
 	interval := cfg.Defaults.WatchInterval
@@ -172,7 +173,7 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 	}
 
 	// Initial fetch and display (before first tick)
-	results := fetchAllProviders(ctx, cfg)
+	results := fetchAllProviders(ctx, cfg, pool)
 	displayResults(results)
 
 	// Track last results for JSON report on exit
@@ -203,7 +204,7 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 			}
 
 			// Fetch current state from all providers
-			results := fetchAllProviders(ctx, cfg)
+			results := fetchAllProviders(ctx, cfg, pool)
 			lastResults = results // Save for JSON report
 
 			// Update display
@@ -218,43 +219,26 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 // Parameters:
 //   - ctx: Context for cancellation and timeout
 //   - cfg: Configuration containing provider list
+//   - pool: Reusable RPC clients keyed by provider name
 //
 // Returns:
 //   - []WatchResult: Results for all providers (includes errors if requests failed)
-func fetchAllProviders(ctx context.Context, cfg *config.Config) []WatchResult {
-	// Results array and mutex for thread-safe access
-	results := make([]WatchResult, len(cfg.Providers))
-	var mu sync.Mutex
+func fetchAllProviders(ctx context.Context, cfg *config.Config, pool *rpc.ClientPool) []WatchResult {
+	exec := provider.ExecuteAll(ctx, cfg.Providers, func(ctx context.Context, p config.Provider) (WatchResult, error) {
+		client := pool.Get(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
+		height, latency, err := client.BlockNumber(ctx)
+		return WatchResult{
+			Provider:    p.Name,
+			BlockHeight: height,
+			Latency:     latency,
+			Error:       err,
+		}, err
+	})
 
-	// Use errgroup for concurrent queries with context cancellation
-	g, gctx := errgroup.WithContext(ctx)
-	for i, p := range cfg.Providers {
-		i, p := i, p // Capture loop variables for goroutine
-		g.Go(func() error {
-			// Create client and query block number
-			client := rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
-			height, latency, err := client.BlockNumber(gctx)
-
-			// Build result structure
-			result := WatchResult{
-				Provider:    p.Name,
-				BlockHeight: height,
-				Latency:     latency,
-				Error:       err,
-			}
-
-			// Thread-safely store result
-			mu.Lock()
-			results[i] = result
-			mu.Unlock()
-
-			return nil // Don't propagate errors, we track them in the result
-		})
+	results := make([]WatchResult, len(exec))
+	for i, r := range exec {
+		results[i] = r.Value
 	}
-
-	// Wait for all concurrent queries to complete
-	// Errors are ignored as they're tracked in individual results
-	_ = g.Wait()
 	return results
 }
 
