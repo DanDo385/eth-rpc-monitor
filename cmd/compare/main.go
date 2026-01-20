@@ -16,10 +16,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/display"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
@@ -222,53 +222,24 @@ func runCompare(cfgPath, blockArg string, jsonOut bool) error {
 		return nil
 	}
 
-	// Print results
-	fmt.Printf("%-14s %10s %12s   %s\n", "Provider", "Latency", "Block Height", "Block Hash")
-	fmt.Println(strings.Repeat("─", 90))
-
+	dispResults := make([]display.CompareResult, 0, len(results))
 	for _, r := range results {
-		if r.Error != nil {
-			fmt.Printf("%-14s %10s %12s   ERROR: %v\n", r.Provider, "—", "—", r.Error)
-		} else {
-			fmt.Printf("%-14s %8dms %12d   %s\n", r.Provider, r.Latency.Milliseconds(), r.Height, r.Hash)
-		}
+		dispResults = append(dispResults, display.CompareResult{
+			Provider: r.Provider,
+			Hash:     r.Hash,
+			Height:   r.Height,
+			Latency:  r.Latency,
+			Err:      r.Error,
+		})
 	}
 
-	// Consensus checks
-	fmt.Println()
-	if successCount == 0 {
-		fmt.Println("✗ No providers responded successfully")
-	} else {
-		// Check for height mismatches
-		if hasHeightMismatch {
-			fmt.Println("⚠ BLOCK HEIGHT MISMATCH DETECTED:")
-			for height, results := range heightGroups {
-				providers := make([]string, len(results))
-				for i, r := range results {
-					providers[i] = r.Provider
-				}
-				fmt.Printf("  Height %d  →  %v\n", height, providers)
-			}
-			fmt.Println("\nThis may indicate lagging providers or propagation delays.")
-			fmt.Println()
-		}
-
-		// Check for hash mismatches (only if heights match)
-		if len(hashGroups) == 1 {
-			fmt.Println("✓ All providers agree on block hash")
-		} else if hasHashMismatch {
-			fmt.Println("⚠ BLOCK HASH MISMATCH DETECTED:")
-			for hash, results := range hashGroups {
-				providers := make([]string, len(results))
-				for i, r := range results {
-					providers[i] = r.Provider
-				}
-				fmt.Printf("  %s...  →  %v\n", hash[:18], providers)
-			}
-			fmt.Println("\nThis may indicate stale caches, chain reorganization, or incorrect data.")
-		}
+	formatter := &display.CompareFormatter{
+		BlockArg: blockArg,
+		Results:  dispResults,
 	}
-	fmt.Println()
+	if err := formatter.Format(os.Stdout); err != nil {
+		return err
+	}
 
 	return nil
 }

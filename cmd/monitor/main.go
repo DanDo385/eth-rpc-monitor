@@ -17,11 +17,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/display"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
@@ -126,55 +126,38 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 	// Track if this is the first display (skip screen clear on first render)
 	firstDisplay := true
 
-	// displayResults is a closure that renders the current state of all providers.
-	// It clears the screen (except on first display) and shows a formatted table.
-	displayResults := func(results []WatchResult) {
-		// Find highest block height to calculate lag
+	render := func(results []WatchResult) error {
 		highestBlock := findHighestBlock(results)
 
-		// Clear screen and move cursor to top-left (ANSI escape codes)
-		// Skip clearing on first display to avoid flicker
 		if !firstDisplay {
-			// ESC[2J clears entire screen, ESC[H moves cursor to home position
-			fmt.Print("\033[2J\033[H")
+			display.Clear(os.Stdout)
 		}
 		firstDisplay = false
 
-		// Display header
-		fmt.Printf("Monitoring %d providers (interval: %s, Ctrl+C to exit)...\n\n", len(cfg.Providers), interval)
-		fmt.Printf("%-14s %12s %10s %12s\n", "Provider", "Block Height", "Latency", "Lag")
-		fmt.Println(strings.Repeat("─", 60))
-
-		// Display each provider's status
+		dispResults := make([]display.MonitorResult, 0, len(results))
 		for _, r := range results {
-			if r.Error != nil {
-				// Error case: show error indicator
-				fmt.Printf("%-14s %12s %10s %12s\n",
-					r.Provider,
-					"ERROR",
-					"—",
-					"—")
-			} else {
-				// Success case: show block height, latency, and lag
-				lag := highestBlock - r.BlockHeight
-				lagStr := "—"
-				if lag > 0 {
-					// Provider is behind the highest block
-					lagStr = fmt.Sprintf("-%d", lag)
-				}
-				fmt.Printf("%-14s %12d %8dms %12s\n",
-					r.Provider,
-					r.BlockHeight,
-					r.Latency.Milliseconds(),
-					lagStr)
-			}
+			dispResults = append(dispResults, display.MonitorResult{
+				Name:        r.Provider,
+				BlockNumber: r.BlockHeight,
+				Latency:     r.Latency,
+				Err:         r.Error,
+			})
 		}
-		fmt.Println()
+
+		formatter := &display.MonitorFormatter{
+			Results:      dispResults,
+			HighestBlock: highestBlock,
+			Interval:     interval,
+			Timestamp:    time.Now(),
+		}
+		return formatter.Format(os.Stdout)
 	}
 
 	// Initial fetch and display (before first tick)
 	results := fetchAllProviders(ctx, cfg, pool)
-	displayResults(results)
+	if err := render(results); err != nil {
+		return err
+	}
 
 	// Track last results for JSON report on exit
 	var lastResults []WatchResult
@@ -208,7 +191,9 @@ func runWatch(cfgPath string, intervalOverride time.Duration, jsonOut bool) erro
 			lastResults = results // Save for JSON report
 
 			// Update display
-			displayResults(results)
+			if err := render(results); err != nil {
+				return err
+			}
 		}
 	}
 }

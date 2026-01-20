@@ -6,10 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/display"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
@@ -146,44 +146,24 @@ func runHealth(cfgPath string, samplesOverride int, jsonOut bool) error {
 		return nil
 	}
 
-	// Print results table
-	fmt.Printf("%-14s %-6s %8s %8s %8s %8s %8s %12s\n",
-		"Provider", "Type", "Success", "P50", "P95", "P99", "Max", "Block")
-	fmt.Println(strings.Repeat("─", 90))
-
+	dispResults := make([]display.HealthResult, 0, len(results))
 	for _, r := range results {
-		successPct := float64(r.Success) / float64(r.Total) * 100
-		fmt.Printf("%-14s %-6s %7.0f%% %7dms %7dms %7dms %7dms %12d\n",
-			r.Name,
-			r.Type,
-			successPct,
-			r.P50Latency.Milliseconds(),
-			r.P95Latency.Milliseconds(),
-			r.P99Latency.Milliseconds(),
-			r.MaxLatency.Milliseconds(),
-			r.BlockHeight)
-	}
-	fmt.Println()
-
-	// Check for block height mismatches (similar to compare command)
-	heightGroups := make(map[uint64][]HealthResult)
-	for _, r := range results {
-		if r.Success > 0 { // Only include providers that had at least one successful sample
-			heightGroups[r.BlockHeight] = append(heightGroups[r.BlockHeight], r)
-		}
+		dispResults = append(dispResults, display.HealthResult{
+			Name:        r.Name,
+			Type:        r.Type,
+			Success:     r.Success,
+			Total:       r.Total,
+			P50Latency:  r.P50Latency,
+			P95Latency:  r.P95Latency,
+			P99Latency:  r.P99Latency,
+			MaxLatency:  r.MaxLatency,
+			BlockHeight: r.BlockHeight,
+		})
 	}
 
-	if len(heightGroups) > 1 {
-		fmt.Println("⚠ BLOCK HEIGHT MISMATCH DETECTED:")
-		for height, results := range heightGroups {
-			providers := make([]string, len(results))
-			for i, r := range results {
-				providers[i] = r.Name
-			}
-			fmt.Printf("  Height %d  →  %v\n", height, providers)
-		}
-		fmt.Println("\nThis may indicate lagging providers or propagation delays.")
-		fmt.Println()
+	formatter := &display.HealthFormatter{Results: dispResults}
+	if err := formatter.Format(os.Stdout); err != nil {
+		return err
 	}
 
 	return nil

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/display"
 	"github.com/dando385/eth-rpc-monitor/internal/env"
 	"github.com/dando385/eth-rpc-monitor/internal/provider"
 	"github.com/dando385/eth-rpc-monitor/internal/reports"
@@ -219,30 +220,17 @@ func runInspect(cfgPath, blockArg, providerName string, jsonOut bool) error {
 	}
 
 	// Terminal output: display formatted block information
-	return printBlock(block, client.Name(), latency)
-}
-
-func printBlock(block *rpc.Block, provider string, latency time.Duration) error {
 	p, err := block.Parsed()
 	if err != nil {
 		return fmt.Errorf("parse block for display: %w", err)
 	}
 
-	fmt.Printf("\nBlock #%s\n", rpc.FormatNumber(p.Number))
-	fmt.Println("═══════════════════════════════════════════════════")
-	fmt.Printf("  Hash:         %s\n", p.Hash)
-	fmt.Printf("  Parent:       %s\n", p.ParentHash)
-	fmt.Printf("  Timestamp:    %s\n", rpc.FormatTimestamp(p.Timestamp))
-	fmt.Printf("  Gas:          %s / %s (%.1f%%)\n",
-		rpc.FormatNumber(p.GasUsed),
-		rpc.FormatNumber(p.GasLimit),
-		float64(p.GasUsed)/float64(p.GasLimit)*100)
-	fmt.Printf("  Base Fee:     %s\n", rpc.FormatGwei(p.BaseFeePerGas))
-	fmt.Printf("  Transactions: %d\n", p.TxCount)
-	fmt.Println()
-	fmt.Printf("  Provider:     %s (%dms)\n", provider, latency.Milliseconds())
-	fmt.Println()
-	return nil
+	formatter := &display.BlockFormatter{
+		Block:    p,
+		Provider: client.Name(),
+		Latency:  latency,
+	}
+	return formatter.Format(os.Stdout)
 }
 
 // selectFastestProvider races all configured providers concurrently to find the fastest one
