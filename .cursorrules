@@ -16,38 +16,40 @@ Target: Portfolio project demonstrating Go proficiency, understanding of Ethereu
 - A wallet or signing tool
 
 ## Tech Stack
-- Go 1.21+
+- Go 1.24+
 - Dependencies (minimal):
-  - `github.com/spf13/cobra` (CLI)
   - `gopkg.in/yaml.v3` (config)
   - `golang.org/x/sync/errgroup` (concurrent provider calls)
 - Raw `net/http` for RPC (need latency visibility)
 - **NO** `go-ethereum` packages
+- **NO** CLI frameworks (simple `flag` package for args)
 
 ## Architecture
 ```
 cmd/
 ├── block/
-│   └── main.go   # Block inspector (fetch and display blocks)
-├── compare/
-│   └── main.go   # Cross-provider comparison (fork detection)
-├── health/
-│   └── main.go   # Provider health check (tail latency metrics)
+│   └── main.go      # Block inspector (fetch and display blocks)
+├── snapshot/
+│   └── main.go      # Cross-provider comparison (fork detection)
+├── test/
+│   └── main.go      # Provider health check (tail latency metrics)
 └── monitor/
-    └── main.go   # Continuous monitoring (real-time dashboard)
+    └── main.go      # Continuous monitoring (real-time dashboard)
 
 internal/
+├── commands/
+│   ├── display.go   # Terminal output formatting (tables, colors)
+│   ├── provider.go  # Provider operations (warmup, concurrent fetch)
+│   ├── report.go    # JSON report generation (timestamped files)
+│   └── stats.go     # Latency statistics (percentiles, sorting)
 ├── config/
 │   └── config.go    # YAML loading, env var expansion, validation
-├── env/
-│   └── env.go       # .env file loader for sensitive config
-├── reports/
-│   └── reports.go   # JSON report generation (timestamped files)
 └── rpc/
     ├── client.go    # HTTP client with retry, latency measurement
     ├── format.go    # Hex parsing, number formatting, unit conversion
+    ├── pool.go      # HTTP client pool for connection reuse
     └── types.go     # Block, Request, Response structs
-    
+
 config/
 └── providers.yaml   # Single source of truth for all config
 ```
@@ -56,11 +58,11 @@ config/
 | Command | Description |
 |---------|-------------|
 | `block [block]` | Inspect block (default: latest, auto-selects fastest provider) |
-| `health` | Test all providers, show tail latency stats (P50/P95/P99/Max) |
-| `compare [block]` | Fetch same block from all providers, detect mismatches |
+| `test` | Test all providers, show tail latency stats (P50/P95/P99/Max) |
+| `snapshot [block]` | Fetch same block from all providers, detect mismatches |
 | `monitor` | Continuous monitoring with refresh interval (real-time dashboard) |
 
-All commands support `--json` flag to output JSON reports to `reports/` directory.
+Commands support `-json` flag to output JSON reports to `reports/` directory.
 
 ## Configuration
 
@@ -112,21 +114,21 @@ Block #19,234,567
   Provider:     alchemy (23ms)
 ```
 
-### JSON (`--json` flag)
+### JSON (`-json` flag)
 Machine-readable reports written to `reports/` directory with timestamped filenames.
 Format: `{command}-{YYYYMMDD-HHMMSS}.json`
 
 ```bash
-./block latest --json              # Writes reports/block-20260120-124236.json
-./health --json                    # Writes reports/health-20260120-124251.json
-./compare latest --json            # Writes reports/compare-20260120-124628.json
-./monitor --json                   # Writes reports/monitor-{timestamp}.json on exit (Ctrl+C)
+./bin/block latest -json           # Writes reports/block-20260120-124236.json
+./bin/test -json                   # Writes reports/test-20260120-124251.json
+./bin/snapshot latest -json        # Writes reports/snapshot-20260120-124628.json
+./bin/monitor -json                # Writes reports/monitor-{timestamp}.json on exit (Ctrl+C)
 ```
 
 JSON output includes:
 - **block**: Decimal values (not hex), ISO 8601 timestamps, gwei for baseFeePerGas
-- **health**: Raw latency samples, percentile calculations, block height mismatches
-- **compare**: Grouped results by hash/height, mismatch detection
+- **test**: Raw latency samples, percentile calculations, block height mismatches
+- **snapshot**: Grouped results by hash/height, mismatch detection
 - **monitor**: Final snapshot with lag calculations
 
 ## Code Patterns
@@ -155,14 +157,14 @@ Race all providers concurrently, select fastest that's on latest block:
 - Ensures both speed and correctness (no stale data)
 
 ### Warm-up Requests
-Both `health` and `compare` commands perform a warm-up request before measurements:
+Both `test` and `snapshot` commands perform a warm-up request before measurements:
 - Eliminates connection setup overhead (TCP handshake, TLS negotiation, DNS lookup)
 - Makes latency metrics more representative of actual RPC performance
 - Warm-up result is discarded, only actual measurements are recorded
 
 ### Error Handling
 - Wrap errors: `fmt.Errorf("context: %w", err)`
-- Return up the stack, let Cobra display
+- Return up the stack, let main function display
 - In JSON mode, errors to stderr only
 
 ### Hex Parsing
@@ -170,7 +172,7 @@ All Ethereum values are hex. Use utility functions from `internal/rpc/format.go`
 - `ParseHexUint64(hex string) (uint64, error)` - For values that fit in 64 bits
 - `ParseHexBigInt(hex string) (*big.Int, error)` - For arbitrarily large values (e.g., baseFeePerGas)
 
-### Percentile Calculation (health command)
+### Percentile Calculation (test command)
 Use nearest-rank method for correct percentile calculation:
 ```go
 index := int(math.Ceil(float64(n)*p)) - 1
@@ -178,7 +180,7 @@ index := int(math.Ceil(float64(n)*p)) - 1
 ```
 
 ### JSON Report Generation
-Use `internal/reports.WriteJSON(data, prefix)` for all JSON output:
+Use `internal/commands.WriteJSONReport(data, prefix)` for all JSON output:
 - Creates `reports/` directory if needed
 - Generates timestamped filenames: `{prefix}-{YYYYMMDD-HHMMSS}.json`
 - Pretty-printed JSON with 2-space indentation
@@ -205,21 +207,24 @@ Use `internal/reports.WriteJSON(data, prefix)` for all JSON output:
 
 ## Testing After Every Change
 ```bash
-# Build all commands
-go build -o block ./cmd/block
-go build -o compare ./cmd/compare
-go build -o health ./cmd/health
-go build -o monitor ./cmd/monitor
+# Build all commands using Makefile
+make build
+
+# Or build manually
+go build -o bin/block ./cmd/block
+go build -o bin/test ./cmd/test
+go build -o bin/snapshot ./cmd/snapshot
+go build -o bin/monitor ./cmd/monitor
 
 # Test each command
-./block latest
-./block latest --json                    # Check reports/block-*.json
-./health --samples 5                      # Quick health check
-./health --json                           # Check reports/health-*.json
-./compare latest                          # Compare all providers
-./compare latest --json                   # Check reports/compare-*.json
-./monitor --interval 5s                   # Test monitoring (Ctrl+C to exit)
-./monitor --json                          # Test with JSON report on exit
+./bin/block latest
+./bin/block latest -json                  # Check reports/block-*.json
+./bin/test -samples 5                     # Quick health check
+./bin/test -json                          # Check reports/test-*.json
+./bin/snapshot latest                     # Compare all providers
+./bin/snapshot latest -json               # Check reports/snapshot-*.json
+./bin/monitor -interval 5s                # Test monitoring (Ctrl+C to exit)
+./bin/monitor -json                       # Test with JSON report on exit
 ```
 
 Verify:

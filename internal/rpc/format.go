@@ -6,6 +6,7 @@ package rpc
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -176,4 +177,46 @@ func FormatGwei(wei *big.Int) string {
 	// Convert to float64 for formatting (precision sufficient for gwei display)
 	f, _ := gwei.Float64()
 	return fmt.Sprintf("%.2f gwei", f)
+}
+
+// NormalizeBlockArg converts block identifiers (decimal, hex, or tag) to RPC format.
+// Returns "latest" for "latest", "pending", "earliest", or empty input.
+//
+// Parameters:
+//   - arg: Block identifier as string (decimal number, hex with "0x" prefix, or special tag)
+//
+// Returns:
+//   - string: Normalized block identifier in RPC format (hex for numbers, "latest" for tags)
+//
+// Examples:
+//   - "latest" -> "latest"
+//   - "12345" -> "0x3039" (decimal converted to hex)
+//   - "0x172721e" -> "0x172721e" (already hex, returned as-is)
+//   - "" -> "latest" (empty string defaults to latest)
+//
+// This function handles the conversion of user-friendly block identifiers
+// to the format expected by Ethereum JSON-RPC methods.
+func NormalizeBlockArg(arg string) string {
+	// Normalize input: trim whitespace and convert to lowercase
+	arg = strings.TrimSpace(strings.ToLower(arg))
+
+	// Handle special block tags
+	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
+		return "latest"
+	}
+
+	// If already hex-encoded, return as-is
+	if strings.HasPrefix(arg, "0x") {
+		return arg
+	}
+
+	// Try to parse as decimal number and convert to hex
+	num, err := strconv.ParseUint(arg, 10, 64)
+	if err != nil {
+		// Not a valid decimal number - return as-is and let RPC handle the error
+		return arg
+	}
+
+	// Convert decimal to hex with "0x" prefix
+	return fmt.Sprintf("0x%x", num)
 }

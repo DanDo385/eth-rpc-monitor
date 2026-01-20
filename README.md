@@ -13,11 +13,19 @@ A lightweight tool for monitoring Ethereum RPC endpoint performance and reliabil
 ```bash
 git clone https://github.com/dando385/eth-rpc-monitor
 cd eth-rpc-monitor
-go build -o block ./cmd/block
-go build -o compare ./cmd/compare
-go build -o health ./cmd/health
-go build -o monitor ./cmd/monitor
+make build
 ```
+
+Or build manually:
+
+```bash
+go build -o bin/block ./cmd/block
+go build -o bin/test ./cmd/test
+go build -o bin/snapshot ./cmd/snapshot
+go build -o bin/monitor ./cmd/monitor
+```
+
+All binaries will be placed in the `bin/` directory.
 
 ## Configuration
 
@@ -132,25 +140,25 @@ Block #21,234,567
 
 ---
 
-### `health` - Provider Health Check
+### `test` - Provider Health Check
 
 Test all providers and compare tail latency performance.
 
 **Usage:**
 ```bash
-health [flags]
+test [flags]
 ```
 
 **Flags:**
 - `--config <path>`: Config file path (default: `config/providers.yaml`)
 - `--samples <count>`: Number of test samples per provider (default: uses config value, typically 30)
-- `--json`: Output JSON report to `reports/health-{timestamp}.json`
+- `--json`: Output JSON report to `reports/test-{timestamp}.json`
 
 **Examples:**
 ```bash
-health              # Uses default samples from config (30)
-health --samples 10 # Override with custom sample count
-health --json       # JSON report to reports/health-{timestamp}.json
+test              # Uses default samples from config (30)
+test --samples 10 # Override with custom sample count
+test --json       # JSON report to reports/test-{timestamp}.json
 ```
 
 **Features:**
@@ -187,13 +195,13 @@ publicnode     public     100%    134ms    178ms    245ms    389ms   21234567
 
 ---
 
-### `compare` - Fork Detection
+### `snapshot` - Fork Detection
 
 Compare block hashes and heights across providers to detect chain splits, stale caches, or sync lag.
 
 **Usage:**
 ```bash
-compare [block_number] [flags]
+snapshot [block_number] [flags]
 ```
 
 **Arguments:**
@@ -201,14 +209,12 @@ compare [block_number] [flags]
 
 **Flags:**
 - `--config <path>`: Config file path (default: `config/providers.yaml`)
-- `--json`: Output JSON report to `reports/compare-{timestamp}.json`
 
 **Examples:**
 ```bash
-compare              # Compare latest block
-compare latest       # Same as above
-compare 19000000     # Compare specific block
-compare latest --json # JSON report to reports/compare-{timestamp}.json
+snapshot              # Compare latest block
+snapshot latest       # Same as above
+snapshot 19000000     # Compare specific block
 ```
 
 **Features:**
@@ -260,13 +266,11 @@ monitor [flags]
 **Flags:**
 - `--config <path>`: Config file path (default: `config/providers.yaml`)
 - `--interval <duration>`: Refresh interval (default: uses config value, typically `30s`)
-- `--json`: Write JSON report on exit (Ctrl+C) to `reports/monitor-{timestamp}.json`
 
 **Examples:**
 ```bash
 monitor                # Uses default interval from config (30s)
 monitor --interval 10s # Override with custom interval
-monitor --json         # Write JSON report on exit (Ctrl+C)
 ```
 
 **Features:**
@@ -288,7 +292,7 @@ Press Ctrl+C to exit gracefully.
 
 ### Quick health check before deployment
 ```bash
-health --samples 10
+test --samples 10
 ```
 Run before deploying trading systems to verify all RPC endpoints are responsive.
 
@@ -300,7 +304,7 @@ Monitor all providers continuously with automatic refresh. Useful during network
 
 ### Verify historical data consistency
 ```bash
-compare 19000000
+snapshot 19000000
 ```
 Ensure all providers agree on historical block data (important for reorgs).
 
@@ -308,8 +312,8 @@ Ensure all providers agree on historical block data (important for reorgs).
 ```bash
 #!/bin/bash
 # Run every 5 minutes via cron
-health --samples 3 > /var/log/rpc-health.log
-compare latest >> /var/log/rpc-health.log
+test --samples 3 > /var/log/rpc-health.log
+snapshot latest >> /var/log/rpc-health.log
 ```
 
 ## Why This Matters
@@ -353,25 +357,27 @@ This tool follows a simple, maintainable design with extensive documentation:
 ```
 cmd/
 ├── block/
-│   └── main.go      # Block inspector (fetch and display blocks)
-├── compare/
-│   └── main.go      # Block comparison (fork detection)
-├── health/
-│   └── main.go      # Health check (tail latency metrics)
+│   └── main.go        # Block inspector (fetch and display blocks)
+├── snapshot/
+│   └── main.go        # Block comparison (fork detection)
+├── test/
+│   └── main.go        # Health check (tail latency metrics)
 └── monitor/
-    └── main.go      # Continuous monitoring (real-time dashboard)
+    └── main.go        # Continuous monitoring (real-time dashboard)
 
 internal/
+├── commands/
+│   ├── display.go     # Terminal output formatting (tables, colors)
+│   ├── provider.go    # Provider operations (warmup, concurrent fetch)
+│   ├── report.go      # JSON report generation (timestamped files)
+│   └── stats.go       # Latency statistics (percentiles, sorting)
 ├── config/
 │   └── config.go      # YAML configuration loader with env expansion
-├── env/
-│   └── env.go        # .env file loader for sensitive config
-├── reports/
-│   └── reports.go    # JSON report generation (timestamped files)
 └── rpc/
-    ├── client.go     # HTTP JSON-RPC client with retry, latency measurement
-    ├── format.go     # Hex parsing, number formatting, unit conversion
-    └── types.go      # Block and response types
+    ├── client.go      # HTTP JSON-RPC client with retry, latency measurement
+    ├── format.go      # Hex parsing, number formatting, unit conversion
+    ├── pool.go        # HTTP client pool for connection reuse
+    └── types.go       # Block and response types
 
 config/
 └── providers.yaml     # Provider configuration (single source of truth)
@@ -384,7 +390,8 @@ config/
 - Pure functions for parsing and formatting
 - Extensive inline documentation for maintainability
 - Concurrent execution using `golang.org/x/sync/errgroup`
-- Warm-up requests in health/compare to eliminate connection overhead
+- Warm-up requests in test/snapshot to eliminate connection overhead
+- HTTP client pooling for connection reuse
 
 ## Troubleshooting
 
@@ -409,7 +416,7 @@ Add `defaults` section to `providers.yaml` with required fields:
 ### Hash mismatch on recent blocks
 This is normal during chain reorganizations (reorgs). If it persists for >5 blocks, one provider may be on a stale fork.
 
-### Height mismatch in compare output
+### Height mismatch in snapshot output
 If providers show different block heights for `latest`, some providers are lagging behind. This is common with free public endpoints during high network activity. Consider using paid providers with SLAs for production systems.
 
 ## Performance Considerations
