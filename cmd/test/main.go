@@ -1,20 +1,52 @@
-// Package main implements the "test" command for provider health checks.
-// This command tests all providers and compares tail latency performance.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
-	"github.com/dando385/eth-rpc-monitor/internal/commands"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/format"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
-func testProvider(client *rpc.Client, p config.Provider, samples int) commands.HealthResult {
+func writeJSON(data interface{}, prefix string) (string, error) {
+	os.MkdirAll("reports", 0755)
+	filename := fmt.Sprintf("reports/%s-%s.json", prefix, time.Now().Format("20060102-150405"))
+	file, _ := os.Create(filename)
+	defer file.Close()
+	enc := json.NewEncoder(file)
+	enc.SetIndent("", "  ")
+	enc.Encode(data)
+	return filename, nil
+}
+
+type TestReport struct {
+	Timestamp time.Time     `json:"timestamp"`
+	Samples   int           `json:"samples"`
+	Results   []TestReportEntry `json:"results"`
+}
+
+type TestReportEntry struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	Success      int      `json:"success"`
+	Total        int      `json:"total"`
+	P50LatencyMS int64    `json:"p50_latency_ms"`
+	P95LatencyMS int64    `json:"p95_latency_ms"`
+	P99LatencyMS int64    `json:"p99_latency_ms"`
+	MaxLatencyMS int64    `json:"max_latency_ms"`
+	BlockHeight  uint64   `json:"block_height"`
+	LatenciesMS  []int64  `json:"latencies_ms"`
+}
+
+func testProvider(client *rpc.Client, p config.Provider, samples int) format.TestResult {
 	ctx := context.Background()
 
 	var latencies []time.Duration
@@ -23,7 +55,7 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) commands.H
 
 	fmt.Fprintf(os.Stderr, "\n[%s] Testing with %d samples...\n", p.Name, samples)
 
-	_, _, _ = client.BlockNumber(ctx)
+	client.BlockNumber(ctx)
 
 	for i := 0; i < samples; i++ {
 		height, latency, err := client.BlockNumber(ctx)
@@ -41,23 +73,19 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) commands.H
 		}
 	}
 
-	tailLatency := commands.CalculateTailLatency(latencies)
+	tailLatency := format.CalculateTailLatency(latencies)
 
 	fmt.Fprintf(os.Stderr, "[%s] Calculated percentiles:\n", p.Name)
 	fmt.Fprintf(os.Stderr, "  P50: %dms, P95: %dms, P99: %dms, Max: %dms\n",
 		tailLatency.P50.Milliseconds(), tailLatency.P95.Milliseconds(), tailLatency.P99.Milliseconds(), tailLatency.Max.Milliseconds())
 
-	return commands.HealthResult{
+	return format.TestResult{
 		Name:        p.Name,
 		Type:        p.Type,
 		Success:     success,
 		Total:       samples,
-		P50Latency:  tailLatency.P50,
-		P95Latency:  tailLatency.P95,
-		P99Latency:  tailLatency.P99,
-		MaxLatency:  tailLatency.Max,
-		BlockHeight: lastHeight,
 		Latencies:   latencies,
+		BlockHeight: lastHeight,
 	}
 }
 
@@ -69,17 +97,33 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 
 	fmt.Printf("\nTesting %d providers with %d samples each...\n\n", len(cfg.Providers), samples)
 
-	ctx := context.Background()
-	results := commands.ExecuteAll(ctx, cfg, nil, func(ctx context.Context, client *rpc.Client, p config.Provider) commands.HealthResult {
-		return testProvider(client, p, samples)
-	})
+	results := make([]format.TestResult, len(cfg.Providers))
+	var mu sync.Mutex
+
+	g, _ := errgroup.WithContext(context.Background())
+
+	for i, p := range cfg.Providers {
+		i, p := i, p
+		g.Go(func() error {
+			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
+			result := testProvider(client, p, samples)
+			
+			mu.Lock()
+			results[i] = result
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	g.Wait()
+
+	g.Wait()
 
 	if jsonOut {
-		samplesCopy := samples
-		reportData := commands.Report{
+		reportData := TestReport{
 			Timestamp: time.Now(),
-			Samples:   &samplesCopy,
-			Results:   make([]commands.ReportEntry, len(results)),
+			Samples:   samples,
+			Results:   make([]TestReportEntry, len(results)),
 		}
 
 		for i, r := range results {
@@ -88,29 +132,22 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 				latenciesMs[j] = lat.Milliseconds()
 			}
 
-			successCopy := r.Success
-			totalCopy := r.Total
-			blockHeightCopy := r.BlockHeight
-			p50 := commands.MillisDuration(r.P50Latency)
-			p95 := commands.MillisDuration(r.P95Latency)
-			p99 := commands.MillisDuration(r.P99Latency)
-			max := commands.MillisDuration(r.MaxLatency)
-
-			reportData.Results[i] = commands.ReportEntry{
+			tail := format.CalculateTailLatency(r.Latencies)
+			reportData.Results[i] = TestReportEntry{
 				Name:         r.Name,
 				Type:         r.Type,
-				Success:      &successCopy,
-				Total:        &totalCopy,
-				P50LatencyMS: &p50,
-				P95LatencyMS: &p95,
-				P99LatencyMS: &p99,
-				MaxLatencyMS: &max,
-				BlockHeight:  &blockHeightCopy,
-				LatenciesMS:  &latenciesMs,
+				Success:      r.Success,
+				Total:        r.Total,
+				P50LatencyMS: tail.P50.Milliseconds(),
+				P95LatencyMS: tail.P95.Milliseconds(),
+				P99LatencyMS: tail.P99.Milliseconds(),
+				MaxLatencyMS: tail.Max.Milliseconds(),
+				BlockHeight:  r.BlockHeight,
+				LatenciesMS:  latenciesMs,
 			}
 		}
 
-		filepath, err := commands.WriteJSON(reportData, "health")
+		filepath, err := writeJSON(reportData, "health")
 		if err != nil {
 			return fmt.Errorf("failed to write JSON report: %w", err)
 		}
@@ -118,18 +155,13 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 		return nil
 	}
 
-	formatter := commands.NewHealthFormatter(results)
-	if err := formatter.Format(os.Stdout); err != nil {
-		return fmt.Errorf("failed to display results: %w", err)
-	}
+	format.FormatTest(os.Stdout, results)
 	return nil
 }
 
 func main() {
-	// Load environment variables from .env file (if present)
 	config.LoadEnv()
 
-	// Define command-line flags
 	var (
 		cfgPath = flag.String("config", "config/providers.yaml", "Config file path")
 		samples = flag.Int("samples", 0, "Number of test samples per provider (0 = use config default)")
@@ -138,7 +170,6 @@ func main() {
 
 	flag.Parse()
 
-	// Execute health check
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

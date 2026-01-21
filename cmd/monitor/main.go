@@ -1,14 +1,3 @@
-// Package main implements the "monitor" command for continuous real-time monitoring.
-// This command periodically queries all providers for their current block height and
-// displays a live-updating dashboard showing block heights, latencies, and lag.
-// Useful for detecting sync issues, network problems, or provider outages in real-time.
-//
-// Usage:
-//
-//	monitor [flags]
-//	monitor --interval 10s
-//
-// The command runs until interrupted (Ctrl+C).
 package main
 
 import (
@@ -17,24 +6,45 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/dando385/eth-rpc-monitor/internal/commands"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/format"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
-func fetchAllProviders(ctx context.Context, cfg *config.Config, pool *rpc.ClientPool) []commands.WatchResult {
-	return commands.ExecuteAll(ctx, cfg, pool, func(ctx context.Context, client *rpc.Client, p config.Provider) commands.WatchResult {
-		height, latency, err := client.BlockNumber(ctx)
-		return commands.WatchResult{
-			Provider:    p.Name,
-			BlockHeight: height,
-			Latency:     latency,
-			Error:       err,
-		}
-	})
+func fetchAllProviders(ctx context.Context, cfg *config.Config) []format.WatchResult {
+	results := make([]format.WatchResult, len(cfg.Providers))
+	var mu sync.Mutex
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i, p := range cfg.Providers {
+		i, p := i, p
+		g.Go(func() error {
+			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
+			height, latency, err := client.BlockNumber(gctx)
+			
+			r := format.WatchResult{
+				Provider:    p.Name,
+				BlockHeight: height,
+				Latency:     latency,
+				Error:       err,
+			}
+
+			mu.Lock()
+			results[i] = r
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	g.Wait()
+	return results
 }
 
 func runMonitor(cfg *config.Config, intervalOverride time.Duration) error {
@@ -57,18 +67,13 @@ func runMonitor(cfg *config.Config, intervalOverride time.Duration) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	pool := rpc.NewClientPool()
-
 	firstDisplay := true
-	displayResults := func(results []commands.WatchResult) {
-		formatter := commands.NewMonitorFormatter(results, interval, len(cfg.Providers), firstDisplay)
-		if err := formatter.Format(os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "Error displaying results: %v\n", err)
-		}
+	displayResults := func(results []format.WatchResult) {
+		format.FormatMonitor(os.Stdout, results, interval, !firstDisplay)
 		firstDisplay = false
 	}
 
-	results := fetchAllProviders(ctx, cfg, pool)
+	results := fetchAllProviders(ctx, cfg)
 	displayResults(results)
 
 	for {
@@ -83,17 +88,15 @@ func runMonitor(cfg *config.Config, intervalOverride time.Duration) error {
 				continue
 			}
 
-			results := fetchAllProviders(ctx, cfg, pool)
+			results := fetchAllProviders(ctx, cfg)
 			displayResults(results)
 		}
 	}
 }
 
 func main() {
-	// Load environment variables from .env file (if present)
 	config.LoadEnv()
 
-	// Define command-line flags
 	var (
 		cfgPath  = flag.String("config", "config/providers.yaml", "Config file path")
 		interval = flag.Duration("interval", 0, "Refresh interval (0 = use config default)")
@@ -101,7 +104,6 @@ func main() {
 
 	flag.Parse()
 
-	// Execute continuous monitoring
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

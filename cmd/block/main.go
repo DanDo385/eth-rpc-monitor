@@ -1,65 +1,58 @@
-// Package main implements the "block" command for inspecting Ethereum blocks.
-// This command fetches block data from RPC providers and displays it in a
-// human-readable format or outputs JSON for programmatic use.
-//
-// Usage:
-//
-//	block [block_number] [flags]
-//	block latest --provider alchemy --json
-//
-// The command automatically selects the fastest provider unless --provider is specified.
+// cmd/block/main.go
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/dando385/eth-rpc-monitor/internal/commands"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dando385/eth-rpc-monitor/internal/config"
+	"github.com/dando385/eth-rpc-monitor/internal/format"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
-// BlockJSON is a JSON-serializable version of Block with human-readable decimal values.
-// This structure is used when --json flag is set to provide cleaner, more parseable
-// JSON output compared to the raw hex-encoded Block structure from the RPC API.
-//
-// Key differences from Block:
-//   - All hex strings converted to native types (uint64, string, float64)
-//   - Timestamp formatted as ISO 8601 string instead of Unix timestamp
-//   - BaseFeePerGas converted from wei to gwei (divided by 10^9)
 type BlockJSON struct {
-	Number        uint64   `json:"number"`                  // Block number as decimal
-	Hash          string   `json:"hash"`                    // Block hash (0x-prefixed hex)
-	ParentHash    string   `json:"parentHash"`              // Parent block hash
-	Timestamp     string   `json:"timestamp"`               // ISO 8601 format (e.g., "2026-01-20T17:02:23Z")
-	GasUsed       uint64   `json:"gasUsed"`                 // Gas used as decimal
-	GasLimit      uint64   `json:"gasLimit"`                // Gas limit as decimal
-	BaseFeePerGas *float64 `json:"baseFeePerGas,omitempty"` // Base fee in gwei (nil if not present)
-	Transactions  []string `json:"transactions"`            // Transaction hashes array
+	Number        uint64    `json:"number"`
+	Hash          string    `json:"hash"`
+	ParentHash    string    `json:"parentHash"`
+	Timestamp     string    `json:"timestamp"`
+	GasUsed       uint64    `json:"gasUsed"`
+	GasLimit      uint64    `json:"gasLimit"`
+	BaseFeePerGas *float64  `json:"baseFeePerGas,omitempty"`
+	Transactions  []string  `json:"transactions"`
 }
 
-// convertBlockToJSON converts a Block (with hex-encoded values) to BlockJSON (with decimal values).
-// This function handles all hex-to-decimal conversions and unit conversions (wei to gwei).
-// It's used when generating JSON reports to provide more readable output.
+func writeJSON(data interface{}, prefix string) (string, error) {
+	os.MkdirAll("reports", 0755)
+	filename := fmt.Sprintf("reports/%s-%s.json", prefix, time.Now().Format("20060102-150405"))
+	file, _ := os.Create(filename)
+	defer file.Close()
+	enc := json.NewEncoder(file)
+	enc.SetIndent("", "  ")
+	enc.Encode(data)
+	return filename, nil
+}
+
 func convertBlockToJSON(block *rpc.Block) BlockJSON {
 	number, _ := rpc.ParseHexUint64(block.Number)
 	timestampUnix, _ := rpc.ParseHexUint64(block.Timestamp)
 	gasUsed, _ := rpc.ParseHexUint64(block.GasUsed)
 	gasLimit, _ := rpc.ParseHexUint64(block.GasLimit)
 
-	// Convert timestamp to ISO 8601 format
 	timestampStr := time.Unix(int64(timestampUnix), 0).UTC().Format(time.RFC3339)
 
 	var baseFeePerGas *float64
 	if block.BaseFeePerGas != "" {
-		baseFee, _ := rpc.ParseHexBigInt(block.BaseFeePerGas)
+		baseFee := rpc.ParseHexBigInt(block.BaseFeePerGas)
 		if baseFee != nil {
-			// Convert wei to gwei
 			gwei := new(big.Float).Quo(
 				new(big.Float).SetInt(baseFee),
 				big.NewFloat(1e9),
@@ -88,13 +81,33 @@ type providerResult struct {
 }
 
 func selectFastestProvider(ctx context.Context, cfg *config.Config) (*rpc.Client, error) {
-	results, clients := commands.ExecuteAllWithClients(ctx, cfg, nil, func(ctx context.Context, client *rpc.Client, _ config.Provider) providerResult {
-		blockNum, latency, err := client.BlockNumber(ctx)
-		if err != nil {
-			return providerResult{hasError: true}
-		}
-		return providerResult{blockNum: blockNum, latency: latency}
-	})
+	results := make([]providerResult, len(cfg.Providers))
+	clients := make([]*rpc.Client, len(cfg.Providers))
+	var mu sync.Mutex
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i, p := range cfg.Providers {
+		i, p := i, p
+		g.Go(func() error {
+			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
+			blockNum, latency, err := client.BlockNumber(gctx)
+			
+			r := providerResult{hasError: err != nil}
+			if err == nil {
+				r.blockNum = blockNum
+				r.latency = latency
+			}
+
+			mu.Lock()
+			results[i] = r
+			clients[i] = client
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	g.Wait()
 
 	var latestBlock uint64
 	successCount := 0
@@ -140,7 +153,7 @@ func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) e
 	if providerName != "" {
 		for _, p := range cfg.Providers {
 			if p.Name == providerName {
-				client = rpc.NewClient(p.Name, p.URL, p.Timeout, cfg.Defaults.MaxRetries)
+				client = rpc.NewClient(p.Name, p.URL, p.Timeout)
 				break
 			}
 		}
@@ -155,16 +168,16 @@ func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) e
 		fmt.Fprintf(os.Stderr, "Auto-selected: %s\n\n", client.Name())
 	}
 
-	_ = client.Warmup(ctx)
+	client.BlockNumber(ctx)
 
-	block, latency, err := client.GetBlock(ctx, rpc.NormalizeBlockArg(blockArg))
+	block, latency, err := client.GetBlock(ctx, blockArg)
 	if err != nil {
 		return fmt.Errorf("failed to fetch block: %w", err)
 	}
 
 	if jsonOut {
 		blockJSON := convertBlockToJSON(block)
-		filepath, err := commands.WriteJSON(blockJSON, "block")
+		filepath, err := writeJSON(blockJSON, "block")
 		if err != nil {
 			return fmt.Errorf("failed to write JSON report: %w", err)
 		}
@@ -172,10 +185,7 @@ func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) e
 		return nil
 	}
 
-	formatter := commands.NewBlockFormatter(block, client.Name(), latency)
-	if err := formatter.Format(os.Stdout); err != nil {
-		return fmt.Errorf("failed to display block: %w", err)
-	}
+	format.FormatBlock(os.Stdout, block, client.Name(), latency)
 	return nil
 }
 
