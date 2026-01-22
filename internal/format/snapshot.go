@@ -16,14 +16,27 @@ type SnapshotResult struct {
 }
 
 func FormatSnapshot(w io.Writer, results []SnapshotResult) {
-	fmt.Fprintf(w, "%-14s %10s %12s   %s\n", "Provider", "Latency", "Block Height", "Block Hash")
+	fmt.Fprintf(w, "%s %s        %s   %s\n",
+		Bold(fmt.Sprintf("%-14s", "Provider")),
+		Bold(fmt.Sprintf("%7s", "Latency")),
+		Bold(fmt.Sprintf("%12s", "Block Height")),
+		Bold("Block Hash"))
 	fmt.Fprintln(w, strings.Repeat("─", 90))
 
 	for _, r := range results {
 		if r.Error != nil {
-			fmt.Fprintf(w, "%-14s %10s %12s   ERROR: %v\n", r.Provider, "—", "—", r.Error)
+			fmt.Fprintf(w, "%-14s %s        %s   %s %v\n",
+				r.Provider,
+				padRight(Dim("—"), 7),
+				padRight(Dim("—"), 12),
+				Red("ERROR:"),
+				r.Error)
 		} else {
-			fmt.Fprintf(w, "%-14s %8dms %12d   %s\n", r.Provider, r.Latency.Milliseconds(), r.Height, r.Hash)
+			fmt.Fprintf(w, "%-14s %s        %12d   %s\n",
+				r.Provider,
+				padRight(ColorLatency(r.Latency.Milliseconds()), 7),
+				r.Height,
+				Dim(r.Hash))
 		}
 	}
 
@@ -40,7 +53,7 @@ func FormatSnapshot(w io.Writer, results []SnapshotResult) {
 	fmt.Fprintln(w)
 
 	if len(heightGroups) > 1 {
-		fmt.Fprintln(w, "⚠ BLOCK HEIGHT MISMATCH DETECTED:")
+		fmt.Fprintln(w, Yellow("⚠"), Bold("BLOCK HEIGHT MISMATCH DETECTED:"))
 		for height, providers := range heightGroups {
 			fmt.Fprintf(w, "  Height %d  →  %v\n", height, providers)
 		}
@@ -48,12 +61,12 @@ func FormatSnapshot(w io.Writer, results []SnapshotResult) {
 	}
 
 	if len(hashGroups) > 1 {
-		fmt.Fprintln(w, "⚠ BLOCK HASH MISMATCH DETECTED:")
+		fmt.Fprintln(w, Yellow("⚠"), Bold("BLOCK HASH MISMATCH DETECTED:"))
 		for hash, providers := range hashGroups {
 			fmt.Fprintf(w, "  %s...  →  %v\n", hash[:18], providers)
 		}
 		fmt.Fprintln(w)
 	} else if len(hashGroups) == 1 {
-		fmt.Fprintln(w, "✓ All providers agree on block hash")
+		fmt.Fprintln(w, Green("✓"), "All providers agree on block hash")
 	}
 }

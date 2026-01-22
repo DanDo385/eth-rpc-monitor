@@ -40,23 +40,45 @@ func CalculateTailLatency(latencies []time.Duration) TailLatency {
 }
 
 func FormatTest(w io.Writer, results []TestResult) {
-	fmt.Fprintf(w, "%-14s %-6s %8s %8s %8s %8s %8s %12s\n",
-		"Provider", "Type", "Success", "P50", "P95", "P99", "Max", "Block")
+	fmt.Fprintf(w, "%s %s %s %s  %s  %s  %s %s\n",
+		Bold(fmt.Sprintf("%-14s", "Provider")),
+		Bold(fmt.Sprintf("%-6s", "Type")),
+		Bold(fmt.Sprintf("%5s", "Success")),
+		Bold(fmt.Sprintf("%3s", "P50")),
+		Bold(fmt.Sprintf("%3s", "P95")),
+		Bold(fmt.Sprintf("%3s", "P99")),
+		Bold(fmt.Sprintf("%3s", "Max")),
+		Bold(fmt.Sprintf("%7s", "Block")))
 	fmt.Fprintln(w, strings.Repeat("─", 90))
 
 	for _, r := range results {
 		tail := CalculateTailLatency(r.Latencies)
-		successPct := float64(r.Success) / float64(r.Total) * 100
 
-		fmt.Fprintf(w, "%-14s %-6s %7.0f%% %7dms %7dms %7dms %7dms %12d\n",
+		fmt.Fprintf(w, "%-14s %-6s %s %s  %s  %s  %s %7d\n",
 			r.Name,
-			r.Type,
-			successPct,
-			tail.P50.Milliseconds(),
-			tail.P95.Milliseconds(),
-			tail.P99.Milliseconds(),
-			tail.Max.Milliseconds(),
+			Dim(r.Type),
+			padRight(ColorSuccess(r.Success, r.Total), 5),
+			padRight(ColorLatency(tail.P50.Milliseconds()), 3),
+			padRight(ColorLatency(tail.P95.Milliseconds()), 3),
+			padRight(ColorLatency(tail.P99.Milliseconds()), 3),
+			padRight(ColorLatency(tail.Max.Milliseconds()), 3),
 			r.BlockHeight)
 	}
 	fmt.Fprintln(w)
+
+	// Check for height mismatches
+	heightGroups := make(map[uint64][]string)
+	for _, r := range results {
+		if r.Success > 0 {
+			heightGroups[r.BlockHeight] = append(heightGroups[r.BlockHeight], r.Name)
+		}
+	}
+
+	if len(heightGroups) > 1 {
+		fmt.Fprintln(w, Yellow("⚠"), Bold("BLOCK HEIGHT MISMATCH DETECTED:"))
+		for height, providers := range heightGroups {
+			fmt.Fprintf(w, "  Height %d  →  %v\n", height, providers)
+		}
+		fmt.Fprintln(w)
+	}
 }

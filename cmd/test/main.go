@@ -28,22 +28,22 @@ func writeJSON(data interface{}, prefix string) (string, error) {
 }
 
 type TestReport struct {
-	Timestamp time.Time     `json:"timestamp"`
-	Samples   int           `json:"samples"`
+	Timestamp time.Time         `json:"timestamp"`
+	Samples   int               `json:"samples"`
 	Results   []TestReportEntry `json:"results"`
 }
 
 type TestReportEntry struct {
-	Name         string   `json:"name"`
-	Type         string   `json:"type"`
-	Success      int      `json:"success"`
-	Total        int      `json:"total"`
-	P50LatencyMS int64    `json:"p50_latency_ms"`
-	P95LatencyMS int64    `json:"p95_latency_ms"`
-	P99LatencyMS int64    `json:"p99_latency_ms"`
-	MaxLatencyMS int64    `json:"max_latency_ms"`
-	BlockHeight  uint64   `json:"block_height"`
-	LatenciesMS  []int64  `json:"latencies_ms"`
+	Name         string  `json:"name"`
+	Type         string  `json:"type"`
+	Success      int     `json:"success"`
+	Total        int     `json:"total"`
+	P50LatencyMS int64   `json:"p50_latency_ms"`
+	P95LatencyMS int64   `json:"p95_latency_ms"`
+	P99LatencyMS int64   `json:"p99_latency_ms"`
+	MaxLatencyMS int64   `json:"max_latency_ms"`
+	BlockHeight  uint64  `json:"block_height"`
+	LatenciesMS  []int64 `json:"latencies_ms"`
 }
 
 func testProvider(client *rpc.Client, p config.Provider, samples int) format.TestResult {
@@ -63,9 +63,9 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 			success++
 			latencies = append(latencies, latency)
 			lastHeight = height
-			fmt.Fprintf(os.Stderr, "  Sample %d/%d: %dms\n", i+1, samples, latency.Milliseconds())
+			fmt.Fprintf(os.Stderr, "  %s %d/%d: %dms\n", p.Name, i+1, samples, latency.Milliseconds())
 		} else {
-			fmt.Fprintf(os.Stderr, "  Sample %d/%d: ERROR - %v\n", i+1, samples, err)
+			fmt.Fprintf(os.Stderr, "  %s %d/%d: ERROR - %v\n", p.Name, i+1, samples, err)
 		}
 
 		if i < samples-1 {
@@ -107,7 +107,7 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 		g.Go(func() error {
 			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
 			result := testProvider(client, p, samples)
-			
+
 			mu.Lock()
 			results[i] = result
 			mu.Unlock()

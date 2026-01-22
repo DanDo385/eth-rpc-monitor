@@ -27,22 +27,33 @@ func FormatMonitor(w io.Writer, results []WatchResult, interval time.Duration, c
 		}
 	}
 
-	fmt.Fprintf(w, "Monitoring %d providers (interval: %s, Ctrl+C to exit)...\n\n", len(results), interval)
-	fmt.Fprintf(w, "%-14s %12s %10s %12s\n", "Provider", "Block Height", "Latency", "Lag")
+	fmt.Fprintf(w, "Monitoring %d providers %s\n\n",
+		len(results),
+		Dim(fmt.Sprintf("(interval: %s, Ctrl+C to exit)", interval)))
+
+	fmt.Fprintf(w, "%s %s %s %s\n",
+		Bold(fmt.Sprintf("%-14s", "Provider")),
+		Bold(fmt.Sprintf("%12s", "Block Height")),
+		Bold(fmt.Sprintf("%7s", "Latency")),
+		Bold(fmt.Sprintf("%3s", "Lag")))
 	fmt.Fprintln(w, strings.Repeat("─", 60))
 
 	for _, r := range results {
 		if r.Error != nil {
-			fmt.Fprintf(w, "%-14s %12s %10s %12s\n", r.Provider, "ERROR", "—", "—")
+			fmt.Fprintf(w, "%-14s %12s %7s %3s\n",
+				r.Provider,
+				padRight(Red("ERROR"), 12),
+				padRight(Dim("—"), 7),
+				padRight(Dim("—"), 3))
 			continue
 		}
 
 		lag := highest - r.BlockHeight
-		lagStr := "—"
-		if lag > 0 {
-			lagStr = fmt.Sprintf("-%d", lag)
-		}
-		fmt.Fprintf(w, "%-14s %12d %8dms %12s\n", r.Provider, r.BlockHeight, r.Latency.Milliseconds(), lagStr)
+		fmt.Fprintf(w, "%-14s %12d %7s %3s\n",
+			r.Provider,
+			r.BlockHeight,
+			padRight(ColorLatency(r.Latency.Milliseconds()), 7),
+			padRight(ColorLag(lag), 3))
 	}
 	fmt.Fprintln(w)
 }

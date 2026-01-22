@@ -34,8 +34,7 @@ Create or edit `config/providers.yaml` (copy from `config/providers.yaml.example
 ```yaml
 defaults:
   timeout: 10s
-  max_retries: 3
-  health_samples: 30      # Default samples for health command
+  health_samples: 30      # Default samples for test command
   watch_interval: 30s     # Default refresh interval for monitor command
 
 providers:
@@ -366,17 +365,17 @@ cmd/
     └── main.go        # Continuous monitoring (real-time dashboard)
 
 internal/
-├── commands/
-│   ├── display.go     # Terminal output formatting (tables, colors)
-│   ├── provider.go    # Provider operations (warmup, concurrent fetch)
-│   ├── report.go      # JSON report generation (timestamped files)
-│   └── stats.go       # Latency statistics (percentiles, sorting)
+├── format/
+│   ├── block.go       # Block formatting (human-readable output)
+│   ├── snapshot.go    # Snapshot comparison formatting
+│   ├── monitor.go     # Monitor dashboard formatting
+│   ├── test.go        # Test results formatting with tail latency
+│   └── colors.go      # Color helpers for terminal output
 ├── config/
 │   └── config.go      # YAML configuration loader with env expansion
 └── rpc/
-    ├── client.go      # HTTP JSON-RPC client with retry, latency measurement
+    ├── client.go      # HTTP JSON-RPC client with latency measurement
     ├── format.go      # Hex parsing, number formatting, unit conversion
-    ├── pool.go        # HTTP client pool for connection reuse
     └── types.go       # Block and response types
 
 config/
@@ -385,13 +384,13 @@ config/
 
 **Design principles:**
 - No external dependencies for RPC (just `net/http`)
-- Simple exponential backoff retry (no circuit breakers)
+- Simplified design (no retry logic, no client pooling)
 - Configuration via YAML with env variable expansion
 - Pure functions for parsing and formatting
-- Extensive inline documentation for maintainability
+- Color-coded terminal output for better visibility
 - Concurrent execution using `golang.org/x/sync/errgroup`
 - Warm-up requests in test/snapshot to eliminate connection overhead
-- HTTP client pooling for connection reuse
+- Walkthrough-friendly code structure for demos
 
 ## Troubleshooting
 
@@ -404,8 +403,7 @@ Specify config path: `block --config /path/to/providers.yaml`
 ### "defaults.timeout is required"
 Add `defaults` section to `providers.yaml` with required fields:
 - `timeout`: Request timeout (e.g., `10s`)
-- `max_retries`: Retry count (e.g., `3`)
-- `health_samples`: Default samples for health command (e.g., `30`)
+- `health_samples`: Default samples for test command (e.g., `30`)
 - `watch_interval`: Default refresh interval for monitor (e.g., `30s`)
 
 ### All providers showing high latency

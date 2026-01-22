@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +21,14 @@ import (
 )
 
 type BlockJSON struct {
-	Number        uint64    `json:"number"`
-	Hash          string    `json:"hash"`
-	ParentHash    string    `json:"parentHash"`
-	Timestamp     string    `json:"timestamp"`
-	GasUsed       uint64    `json:"gasUsed"`
-	GasLimit      uint64    `json:"gasLimit"`
-	BaseFeePerGas *float64  `json:"baseFeePerGas,omitempty"`
-	Transactions  []string  `json:"transactions"`
+	Number        uint64   `json:"number"`
+	Hash          string   `json:"hash"`
+	ParentHash    string   `json:"parentHash"`
+	Timestamp     string   `json:"timestamp"`
+	GasUsed       uint64   `json:"gasUsed"`
+	GasLimit      uint64   `json:"gasLimit"`
+	BaseFeePerGas *float64 `json:"baseFeePerGas,omitempty"`
+	Transactions  []string `json:"transactions"`
 }
 
 func writeJSON(data interface{}, prefix string) (string, error) {
@@ -92,7 +93,7 @@ func selectFastestProvider(ctx context.Context, cfg *config.Config) (*rpc.Client
 		g.Go(func() error {
 			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
 			blockNum, latency, err := client.BlockNumber(gctx)
-			
+
 			r := providerResult{hasError: err != nil}
 			if err == nil {
 				r.blockNum = blockNum
@@ -142,6 +143,30 @@ func selectFastestProvider(ctx context.Context, cfg *config.Config) (*rpc.Client
 	}
 
 	return fastest, nil
+}
+
+func normalizeBlockArg(arg string) string {
+	arg = strings.TrimSpace(strings.ToLower(arg))
+
+	// Handle special block tags
+	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
+		return "latest"
+	}
+
+	// If already hex-encoded, return as-is
+	if strings.HasPrefix(arg, "0x") {
+		return arg
+	}
+
+	// Try to parse as decimal number and convert to hex
+	num, err := strconv.ParseUint(arg, 10, 64)
+	if err != nil {
+		// Not a valid decimal number - return as-is and let RPC handle the error
+		return arg
+	}
+
+	// Convert decimal to hex with "0x" prefix
+	return fmt.Sprintf("0x%x", num)
 }
 
 func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) error {
@@ -198,33 +223,12 @@ func main() {
 		jsonOut  = flag.Bool("json", false, "Output JSON report to reports directory")
 	)
 
-	flag.CommandLine.Parse(os.Args[1:])
+	flag.Parse()
 
 	block := "latest"
 	args := flag.Args()
-
-	for i, arg := range args {
-		if arg == "--json" || arg == "-json" {
-			*jsonOut = true
-			args = append(args[:i], args[i+1:]...)
-			break
-		}
-		if strings.HasPrefix(arg, "--provider=") {
-			*provider = strings.TrimPrefix(arg, "--provider=")
-			args = append(args[:i], args[i+1:]...)
-			break
-		}
-		if arg == "--provider" || arg == "-provider" {
-			if i+1 < len(args) {
-				*provider = args[i+1]
-				args = append(args[:i], args[i+2:]...)
-			}
-			break
-		}
-	}
-
 	if len(args) > 0 {
-		block = args[0]
+		block = normalizeBlockArg(args[0])
 	}
 
 	cfg, err := config.Load(*cfgPath)

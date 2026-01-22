@@ -20,6 +20,7 @@ Target: Portfolio project demonstrating Go proficiency, understanding of Ethereu
 - Dependencies (minimal):
   - `gopkg.in/yaml.v3` (config)
   - `golang.org/x/sync/errgroup` (concurrent provider calls)
+  - `github.com/fatih/color` (terminal color formatting)
 - Raw `net/http` for RPC (need latency visibility)
 - **NO** `go-ethereum` packages
 - **NO** CLI frameworks (simple `flag` package for args)
@@ -37,17 +38,17 @@ cmd/
     └── main.go      # Continuous monitoring (real-time dashboard)
 
 internal/
-├── commands/
-│   ├── display.go   # Terminal output formatting (tables, colors)
-│   ├── provider.go  # Provider operations (warmup, concurrent fetch)
-│   ├── report.go    # JSON report generation (timestamped files)
-│   └── stats.go     # Latency statistics (percentiles, sorting)
+├── format/
+│   ├── block.go     # Block formatting (human-readable output)
+│   ├── snapshot.go  # Snapshot comparison formatting
+│   ├── monitor.go   # Monitor dashboard formatting
+│   ├── test.go      # Test results formatting with tail latency
+│   └── colors.go    # Color helpers for terminal output
 ├── config/
-│   └── config.go    # YAML loading, env var expansion, validation
+│   └── config.go    # YAML loading, env var expansion
 └── rpc/
-    ├── client.go    # HTTP client with retry, latency measurement
+    ├── client.go    # HTTP client with latency measurement
     ├── format.go    # Hex parsing, number formatting, unit conversion
-    ├── pool.go      # HTTP client pool for connection reuse
     └── types.go     # Block, Request, Response structs
 
 config/
@@ -71,15 +72,16 @@ All defaults live in `config/providers.yaml`. Go code inherits from YAML, never 
 ```yaml
 defaults:
   timeout: 10s
-  max_retries: 3  # Set to 0 for no retry
+  health_samples: 30      # Default samples for test command
+  watch_interval: 30s     # Default refresh interval for monitor command
 
 providers:
   - name: alchemy
     url: ${ALCHEMY_URL}
-    type: paid
+    type: public
   - name: ankr
     url: https://rpc.ankr.com/eth
-    type: free
+    type: public
 ```
 
 ### Environment Variables
@@ -90,10 +92,11 @@ URLs can use `${VAR}` syntax. Expanded at load time via `os.ExpandEnv()`.
 ### JSON for Wire Protocol (Required)
 Ethereum JSON-RPC requires JSON. The `json` struct tags in `types.go` are for the wire protocol, not config.
 
-### Retry Policy (Configurable)
-- `max_retries: 0` = fail immediately
-- `max_retries: 3` = retry up to 3 times with exponential backoff
-- No circuit breaker (removed for simplicity)
+### Simplified Design
+- No retry logic (assumes correct user input and reliable network)
+- No client pooling (creates clients as needed)
+- Direct HTTP calls with timeout
+- Latency measurement for all requests
 
 ### Methods Needed
 - `eth_blockNumber` - current height
@@ -102,10 +105,10 @@ Ethereum JSON-RPC requires JSON. The `json` struct tags in `types.go` are for th
 ## Output Modes
 
 ### Terminal (Default)
-Human-readable with formatting. Example:
+Human-readable with color formatting. Example:
 ```
 Block #19,234,567
-═══════════════════════════════════════════════════
+══════════════════════════════════════════════════
   Hash:         0xabcd1234...
   Timestamp:    2024-01-15 14:23:11 UTC (2m ago)
   Gas:          12,456,789 / 30,000,000 (41.5%)
@@ -113,6 +116,13 @@ Block #19,234,567
 
   Provider:     alchemy (23ms)
 ```
+
+Color scheme:
+- **Green**: Fast latency (<100ms), success indicators
+- **Yellow**: Medium latency (100-300ms), warnings
+- **Red**: Slow latency (>300ms), errors
+- **Bold**: Headers and important labels
+- **Dim**: Secondary information
 
 ### JSON (`-json` flag)
 Machine-readable reports written to `reports/` directory with timestamped filenames.
@@ -180,7 +190,7 @@ index := int(math.Ceil(float64(n)*p)) - 1
 ```
 
 ### JSON Report Generation
-Use `internal/commands.WriteJSONReport(data, prefix)` for all JSON output:
+Each command has an inline `writeJSON` helper function:
 - Creates `reports/` directory if needed
 - Generates timestamped filenames: `{prefix}-{YYYYMMDD-HHMMSS}.json`
 - Pretty-printed JSON with 2-space indentation
@@ -203,7 +213,8 @@ Use `internal/commands.WriteJSONReport(data, prefix)` for all JSON output:
 - Hardcode config values in Go (use YAML)
 - Mix stdout/stderr in JSON mode (errors to stderr, JSON to stdout)
 - Compare block hashes from different heights
-- Skip error handling (always check and wrap errors)
+- Add defensive validation (assume correct user input)
+- Add retry logic or complex error handling (keep it simple)
 
 ## Testing After Every Change
 ```bash

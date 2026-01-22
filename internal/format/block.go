@@ -11,18 +11,19 @@ import (
 func FormatBlock(w io.Writer, block *rpc.Block, provider string, latency time.Duration) {
 	p := block.Parsed()
 
-	fmt.Fprintf(w, "\nBlock #%s\n", rpc.FormatNumber(p.Number))
+	fmt.Fprintf(w, "\n%s #%s\n", Bold("Block"), Bold(rpc.FormatNumber(p.Number)))
 	fmt.Fprintln(w, "══════════════════════════════════════════════════")
-	fmt.Fprintf(w, "  Hash:         %s\n", p.Hash)
-	fmt.Fprintf(w, "  Parent:       %s\n", p.ParentHash)
-	fmt.Fprintf(w, "  Timestamp:    %s\n", rpc.FormatTimestamp(p.Timestamp))
-	fmt.Fprintf(w, "  Gas:          %s / %s (%.1f%%)\n",
+	fmt.Fprintf(w, "  %s     %s\n", Bold("Hash:"), p.Hash)
+	fmt.Fprintf(w, "  %s   %s\n", Bold("Parent:"), p.ParentHash)
+	fmt.Fprintf(w, "  %s %s\n", Bold("Timestamp:"), rpc.FormatTimestamp(p.Timestamp))
+	fmt.Fprintf(w, "  %s      %s / %s %s\n",
+		Bold("Gas:"),
 		rpc.FormatNumber(p.GasUsed),
 		rpc.FormatNumber(p.GasLimit),
-		float64(p.GasUsed)/float64(p.GasLimit)*100)
-	fmt.Fprintf(w, "  Base Fee:     %s\n", rpc.FormatGwei(p.BaseFeePerGas))
-	fmt.Fprintf(w, "  Transactions: %d\n", p.TxCount)
+		Dim(fmt.Sprintf("(%.1f%%)", float64(p.GasUsed)/float64(p.GasLimit)*100)))
+	fmt.Fprintf(w, "  %s %s\n", Bold("Base Fee:"), rpc.FormatGwei(p.BaseFeePerGas))
+	fmt.Fprintf(w, "  %s %d\n", Bold("Transactions:"), p.TxCount)
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  Provider:     %s (%dms)\n", provider, latency.Milliseconds())
+	fmt.Fprintf(w, "  %s %s %s\n", Bold("Provider:"), provider, Dim(fmt.Sprintf("(%dms)", latency.Milliseconds())))
 	fmt.Fprintln(w)
 }
