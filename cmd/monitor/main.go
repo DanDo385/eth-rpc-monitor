@@ -24,7 +24,7 @@ func fetchAllProviders(ctx context.Context, cfg *config.Config) []format.WatchRe
 	g, gctx := errgroup.WithContext(ctx)
 
 	for i, p := range cfg.Providers {
-		i, p := i, p
+		i, p := i, p // shadowing the loop variables to avoid the "loop variable captured by func literal" error
 		g.Go(func() error {
 			client := rpc.NewClient(p.Name, p.URL, p.Timeout)
 			height, latency, err := client.BlockNumber(gctx)
