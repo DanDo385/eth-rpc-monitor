@@ -24,7 +24,6 @@ go.work
 .vscode/
 *.swp
 *.swo
-.cursorrules
 
 # OS
 .DS_Store
@@ -36,6 +35,9 @@ config/providers.yaml
 
 # Environment variables
 .env
+
+# Nested profile repo (local clone; not part of this project)
+/dando385/
 
 # Reports
 reports/

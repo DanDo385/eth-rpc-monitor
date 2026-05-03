@@ -1,562 +1,225 @@
 # Ethereum RPC Monitor
 
-A lightweight Go tool for monitoring Ethereum RPC endpoint performance and reliability. Built for teams who treat blockchain infrastructure as production-critical.
+Go CLI tools to measure Ethereum JSON-RPC **latency**, **health**, and **cross-provider agreement**. Four binaries share one YAML config.
 
-## What This Project Does
+---
 
-This tool answers four questions about your Ethereum RPC providers:
+## 1. Prerequisites
 
-1. **`block`** — "What does the latest block look like, and who served it fastest?"
-2. **`test`** — "How reliable and fast is each provider over N samples?"
-3. **`snapshot`** — "Do all providers agree on the current state of the blockchain?"
-4. **`monitor`** — "What is happening right now, continuously?"
+- **Go 1.24+** ([install](https://go.dev/dl/))
+- At least one **Ethereum mainnet HTTP(S) RPC URL** (public endpoints work; paid keys optional)
 
-Each question is a separate binary. All four share the same configuration file and internal libraries.
+---
 
-## How the System Works
-
-### The Big Picture
-
-Ethereum applications talk to the blockchain through **RPC (Remote Procedure Call) endpoints** — HTTP APIs provided by services like Alchemy, Infura, or self-hosted nodes. These endpoints accept JSON-RPC requests ("What is the latest block number?") and return JSON responses ("0x1444F3B").
-
-This tool measures the **performance** and **consistency** of those endpoints. Performance means latency (how fast they respond). Consistency means agreement (do they all return the same data for the same query?).
-
-### Core Computer Science Concepts
-
-Reading this codebase will expose you to the following concepts, all applied in a real production context:
-
-- **Concurrency and Goroutines** — Every command queries multiple providers simultaneously using Go's goroutines and `errgroup` for structured concurrency. You'll see mutexes protecting shared state, contexts propagating cancellation, and closures capturing loop variables.
-
-- **Pointers, Addresses, and Indirection** — Go uses pointers extensively. Every `*` and `&` in the code is documented with memory diagrams showing what exists on the stack vs. the heap, what gets copied vs. shared, and why the choice matters.
-
-- **Network I/O and HTTP** — The RPC client builds JSON-RPC requests, sends them over HTTP POST, and measures round-trip latency. You'll see how Go's `net/http` manages connection pooling, how contexts abort in-flight requests, and how `defer` ensures cleanup.
-
-- **Data Transformation Pipelines** — Block data flows through three representations: hex strings from the wire, native Go types for logic, and formatted strings for display. Each transformation is explicit and documented.
-
-- **Statistical Analysis** — The `test` command computes percentiles (P50, P95, P99) using the nearest-rank method. The comments explain why percentiles are superior to averages for latency analysis.
-
-- **Event Loops and Signal Handling** — The `monitor` command implements a `select`-based event loop with ticker-driven periodic refresh and OS signal handling for graceful shutdown.
-
-### Data Flow Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Configuration Loading                     │
-│  .env file → LoadEnv() → os.Setenv()                       │
-│  providers.yaml → os.ExpandEnv() → yaml.Unmarshal → Config │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-              ┌────────▼─────────────────────────────────────┐
-              │              RPC Client Creation              │
-              │  For each provider: NewClient(name, url, to)  │
-              └────────┬─────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┬──────────────┐
-        │              │              │              │
-        ▼              ▼              ▼              ▼
-   ┌─────────┐  ┌───────────┐  ┌──────────┐  ┌──────────┐
-   │  block  │  │   test    │  │ snapshot │  │ monitor  │
-   │ command │  │  command  │  │ command  │  │ command  │
-   └────┬────┘  └─────┬─────┘  └────┬─────┘  └────┬─────┘
-        │             │              │              │
-        ▼             ▼              ▼              ▼
-   Select fastest  N samples    Same block     Ticker loop
-   → fetch block   per provider  all providers  → fetch all
-   → display       → percentiles → compare      → display
-                   → display      hashes/heights → repeat
-        │             │              │              │
-        └──────────┬──┴──────────────┴──────────────┘
-                   │
-          ┌────────▼──────────┐
-          │  RPC Client.Call  │
-          │  JSON-RPC over    │
-          │  HTTP POST        │
-          │  Latency measured │
-          └────────┬──────────┘
-                   │
-          ┌────────▼──────────┐
-          │  Ethereum Node    │
-          │  (remote)         │
-          └───────────────────┘
-```
-
-### Reading Order
-
-For the best learning experience, read the source files in this order:
-
-1. **`internal/rpc/types.go`** — Start here. Defines every data structure in the system. Introduces the two-layer type model (hex wire format vs. typed values) and explains pointer types with memory diagrams.
-
-2. **`internal/rpc/format.go`** — Hex parsing and human-readable formatting. Covers number bases, arbitrary-precision arithmetic with `big.Int`, and Go's time formatting reference date.
-
-3. **`internal/rpc/client.go`** — The HTTP JSON-RPC client. Shows how requests are serialized, latency is measured, and responses are deserialized. Extensive `&` and `*` documentation with memory diagrams.
-
-4. **`internal/config/config.go`** — YAML configuration loading with environment variable expansion. Demonstrates the `&` address-of operator in `yaml.Unmarshal`, index-based loop iteration for mutation, and Go's escape analysis.
-
-5. **`internal/format/colors.go`** — Terminal color handling. Explains ANSI escape codes, the padding problem with colored strings, and Go closures.
-
-6. **`internal/format/block.go`** — Single-block display. Shows the `io.Writer` pattern for testable output and pointer parameter semantics.
-
-7. **`internal/format/test.go`** — Percentile calculation and test results table. Covers the nearest-rank method, defensive slice copying, and height mismatch detection.
-
-8. **`internal/format/snapshot.go`** — Fork detection display. Explains the `error` interface, map-based grouping, and consensus analysis.
-
-9. **`internal/format/monitor.go`** — Live dashboard rendering. Covers ANSI screen clearing and relative lag calculation.
-
-10. **`cmd/block/main.go`** — Block inspector. Demonstrates concurrent provider selection, context timeouts, flag parsing with pointer returns, error wrapping, and JSON export.
-
-11. **`cmd/test/main.go`** — Health check. Shows concurrent sampling with `errgroup`, warm-up methodology, and inter-sample delays.
-
-12. **`cmd/snapshot/main.go`** — Fork detection. The simplest command — a complete concurrent pipeline in a single `main()` function.
-
-13. **`cmd/monitor/main.go`** — Continuous monitor. The most architecturally rich file: event loops, signal handling, channels, tickers, context cancellation, and closures with mutable captured state.
-
-## Installation
-
-### Prerequisites
-- Go 1.24 or later
-- Ethereum RPC endpoint URLs (paid or free)
-
-### Build from source
+## 2. Get the code
 
 ```bash
-git clone https://github.com/dando385/eth-rpc-monitor
+git clone https://github.com/dando385/eth-rpc-monitor.git
 cd eth-rpc-monitor
+```
+
+---
+
+## 3. Configure providers
+
+All commands read **`config/providers.yaml`** by default.
+
+1. **Copy the example file** (the real `providers.yaml` is gitignored so secrets stay local):
+
+   ```bash
+   cp config/providers.yaml.example config/providers.yaml
+   ```
+
+2. **Edit `config/providers.yaml`**:
+   - Set **`defaults`**: `timeout`, `health_samples` (for `test`), `watch_interval` (for `monitor`).
+   - Under **`providers`**, list each endpoint with `name`, `url`, and optional `type` (informational only).
+
+3. **URLs and secrets**  
+   Use `${VAR}` in URLs; values are filled with `os.ExpandEnv()` after load.
+
+4. **Optional `.env` in the project root**  
+   Each command calls `config.LoadEnv()` so a `.env` file can define keys without exporting them in your shell:
+
+   ```bash
+   # .env (do not commit)
+   ALCHEMY_API_KEY=your_key
+   INFURA_API_KEY=your_key
+   ```
+
+   You can instead `export` those variables before running—either works.
+
+5. **Run from the repo root** (or pass `--config` with an absolute path) so the default `config/providers.yaml` resolves correctly.
+
+---
+
+## 4. Build
+
+**Makefile (recommended):**
+
+```bash
 make build
 ```
 
-Or build manually:
+This creates **`bin/block`**, **`bin/test`**, **`bin/snapshot`**, and **`bin/monitor`**.
+
+**Manual:**
 
 ```bash
+mkdir -p bin
 go build -o bin/block ./cmd/block
 go build -o bin/test ./cmd/test
 go build -o bin/snapshot ./cmd/snapshot
 go build -o bin/monitor ./cmd/monitor
 ```
 
-All binaries will be placed in the `bin/` directory.
-
-## Configuration
-
-Create or edit `config/providers.yaml` (copy from `config/providers.yaml.example`):
-
-```yaml
-defaults:
-  timeout: 10s
-  health_samples: 30      # Default samples for test command
-  watch_interval: 30s     # Default refresh interval for monitor command
-
-providers:
-  # Alchemy – managed public RPC
-  - name: alchemy
-    url: https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
-    type: public
-
-  # Infura – ConsenSys managed public RPC
-  - name: infura
-    url: https://mainnet.infura.io/v3/YOUR_API_KEY
-    type: public
-
-  # LlamaNodes – community public RPC
-  - name: llamanodes
-    url: https://eth.llamarpc.com
-    type: public
-
-  # PublicNode – community public RPC
-  - name: publicnode
-    url: https://ethereum-rpc.publicnode.com
-    type: public
-
-  # Example self-hosted (commented)
-  # - name: local-geth
-  #   url: http://localhost:8545
-  #   type: self_hosted
-  #   timeout: 5s
-
-  # Example enterprise (commented)
-  # - name: alchemy-enterprise
-  #   url: https://eth-mainnet.g.alchemy.com/v2/YOUR_ENTERPRISE_KEY
-  #   type: enterprise
-  #   timeout: 15s
-```
-
-### Environment Variables
-
-URLs support `${VAR}` syntax for environment variable expansion:
+**Run a command** (from repo root):
 
 ```bash
-export ALCHEMY_API_KEY="your_key_here"
-export INFURA_API_KEY="your_key_here"
-```
-
-The config automatically expands environment variables using `os.ExpandEnv()`.
-
-**Note:** The `type` field (public, self_hosted, enterprise) is informational only and does not affect provider behavior.
-
-## Commands
-
-### `block` - Block Inspector
-
-View detailed block information with automatic provider selection.
-
-**Usage:**
-```bash
-block [block_number] [flags]
-```
-
-**Arguments:**
-- `block_number` (optional): Block identifier - can be:
-  - `latest` (default) - Most recent block
-  - `pending` - Pending block
-  - `earliest` - Genesis block
-  - Decimal number (e.g., `19000000`)
-  - Hex number (e.g., `0x121eac0`)
-
-**Flags:**
-- `--config <path>`: Config file path (default: `config/providers.yaml`)
-- `--provider <name>`: Use specific provider instead of auto-selecting fastest
-- `--json`: Output JSON report to `reports/block-{timestamp}.json`
-
-**Examples:**
-```bash
-block                    # Latest block from fastest provider
-block 19000000          # Specific block by number
-block 0x121eac0         # Specific block by hex
-block latest --provider alchemy
-block latest --json     # JSON report to reports/block-{timestamp}.json
-```
-
-**JSON output features:**
-- Decimal values (not hex) for easier parsing
-- ISO 8601 timestamps (e.g., "2026-01-20T17:02:23Z")
-- Base fee converted to gwei (not wei)
-- All numeric fields as native types
-
-**Output example:**
-```
-Block #21,234,567
-═══════════════════════════════════════════════════
-  Hash:         0xa1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
-  Parent:       0x9876543210...
-  Timestamp:    2024-01-15 14:32:18 UTC (12s ago)
-  Gas:          29,847,293 / 30,000,000 (99.5%)
-  Base Fee:     25.43 gwei
-  Transactions: 342
-
-  Provider:     alchemy (45ms)
+./bin/block latest
+./bin/test --samples 5
 ```
 
 ---
 
-### `test` - Provider Health Check
+## 5. Commands (walkthrough)
 
-Test all providers and compare tail latency performance.
+Global flag (where supported): **`--config <path>`** — defaults to `config/providers.yaml`.
 
-**Usage:**
+### `block` — Inspect one block
+
+Picks a provider (fastest among those on the highest seen head, unless you pin one), then fetches and prints block details.
+
 ```bash
-test [flags]
+./bin/block                    # same as ./bin/block latest
+./bin/block latest
+./bin/block pending
+./bin/block earliest
+./bin/block 19000000           # decimal height
+./bin/block 0x121eac0          # hex height
+./bin/block latest --provider alchemy
+./bin/block latest --json      # writes reports/block-YYYYMMDD-HHMMSS.json
 ```
 
-**Flags:**
-- `--config <path>`: Config file path (default: `config/providers.yaml`)
-- `--samples <count>`: Number of test samples per provider (default: uses config value, typically 30)
-- `--json`: Output JSON report to `reports/test-{timestamp}.json`
-
-**Examples:**
-```bash
-test              # Uses default samples from config (30)
-test --samples 10 # Override with custom sample count
-test --json       # JSON report to reports/test-{timestamp}.json
-```
-
-**Features:**
-- Warm-up request eliminates connection setup overhead from measurements
-- Individual latency samples printed to stderr for tracing
-- Percentile calculation uses nearest-rank method (ensures P95/P99 = Max for small samples)
-- Block height mismatch detection (groups providers by height)
-
-**Output example:**
-```
-Testing 4 providers with 30 samples each...
-
-Provider       Type   Success      P50      P95      P99      Max        Block
-──────────────────────────────────────────────────────────────────────────────────
-alchemy        public     100%     23ms     45ms     52ms     78ms   21234567
-infura         public     100%     19ms     38ms     47ms     65ms   21234567
-llamanodes     public      97%    142ms    203ms    287ms    412ms   21234566
-publicnode     public     100%    134ms    178ms    245ms    389ms   21234567
-```
-
-**Metrics explained:**
-- **P50 (median)**: Typical response time
-- **P95**: 95% of requests faster than this (captures outliers)
-- **P99**: 99th percentile (worst-case scenarios)
-- **Max**: Absolute worst observed latency
-- Block height differences indicate sync lag
-- Tail latency metrics (P95/P99/Max) are critical for trading systems where outliers cause missed opportunities
-
-**Red flags:**
-- Success rate < 95%
-- P99 >> P50 (high variance, unpredictable performance)
-- P99 > 500ms for paid providers (consider switching)
-- Block height lagging behind others
+**Flags:** `--config`, `--provider <name>`, `--json`
 
 ---
 
-### `snapshot` - Fork Detection
+### `test` — Latency and success over many samples
 
-Compare block hashes and heights across providers to detect chain splits, stale caches, or sync lag.
+Hits every provider repeatedly, prints a summary table (P50 / P95 / P99 / Max), and warns on height drift. Does a **warm-up** request first (not counted in stats).
 
-**Usage:**
 ```bash
-snapshot [block_number] [flags]
+./bin/test                     # sample count from config (health_samples)
+./bin/test --samples 10
+./bin/test --json              # writes reports/test-YYYYMMDD-HHMMSS.json
 ```
 
-**Arguments:**
-- `block_number` (optional): Block identifier (same format as `block` command, default: `latest`)
-
-**Flags:**
-- `--config <path>`: Config file path (default: `config/providers.yaml`)
-
-**Examples:**
-```bash
-snapshot              # Compare latest block
-snapshot latest       # Same as above
-snapshot 19000000     # Compare specific block
-```
-
-**Features:**
-- Warm-up request for accurate latency measurements
-- Concurrent fetching using errgroup for speed
-- Groups providers by hash/height to show consensus
-- Detects both height mismatches (sync lag) and hash mismatches (forks/stale data)
-
-**Output example:**
-```
-Fetching block latest from 4 providers...
-
-Provider       Latency   Block Height   Block Hash
-──────────────────────────────────────────────────────────────────────────────────────
-alchemy          43ms        21234567   0xa1b2c3d4e5f6...
-infura           39ms        21234567   0xa1b2c3d4e5f6...
-llamanodes      167ms        21234566   0xa1b2c3d4e5f6...
-publicnode      142ms        21234567   0xa1b2c3d4e5f6...
-
-⚠ BLOCK HEIGHT MISMATCH DETECTED:
-  Height 21234567  →  [alchemy infura publicnode]
-  Height 21234566  →  [llamanodes]
-```
-
-**Why this matters:**
-- **Height mismatches**: Provider is lagging behind the chain (propagation delay or sync issues)
-- **Hash mismatches**: Providers disagree on block data (stale cache, chain reorganization, or fork)
-- If your trading bot uses stale data, it might execute trades based on outdated state, leading to failed transactions or losses
+**Flags:** `--config`, `--samples <n>`, `--json`
 
 ---
 
-### `monitor` - Continuous Monitoring
+### `snapshot` — Same block from everyone; compare hash / height
 
-Watch all providers in real-time with automatic refresh.
+Fetches one block from **all** providers concurrently and groups results to spot lag or disagreement.
 
-**Usage:**
 ```bash
-monitor [flags]
+./bin/snapshot                 # latest
+./bin/snapshot latest
+./bin/snapshot 0x121eac0       # hex block tag
 ```
 
-**Flags:**
-- `--config <path>`: Config file path (default: `config/providers.yaml`)
-- `--interval <duration>`: Refresh interval (default: uses config value, typically `30s`)
+**Note:** Prefer **`latest`** or **hex** tags here; decimal heights may not match what your nodes expect for `eth_getBlockByNumber`. Use **`block`** for flexible decimal/hex handling on a single provider.
 
-**Examples:**
-```bash
-monitor                # Uses default interval from config (30s)
-monitor --interval 10s # Override with custom interval
-```
-
-**Features:**
-- Real-time dashboard with screen clearing (ANSI escape codes)
-- Graceful shutdown on Ctrl+C with signal handling
-- Concurrent provider queries for fast refresh cycles
-
-**Output updates continuously showing:**
-- Current block height per provider
-- Latency for each request
-- Lag vs highest observed block (shows which providers are behind)
-
-Press Ctrl+C to exit gracefully.
+**Flags:** `--config` only
 
 ---
 
-## Usage Examples
+### `monitor` — Live dashboard
 
-### Quick health check before deployment
+Clears/redraws the terminal on an interval; shows height, latency, and lag vs best head. **Ctrl+C** exits.
+
 ```bash
-test --samples 10
+./bin/monitor                  # interval from config (watch_interval)
+./bin/monitor --interval 10s   # override refresh
 ```
-Run before deploying trading systems to verify all RPC endpoints are responsive.
 
-### Monitor block production during high activity
+**Flags:** `--config`, `--interval <duration>` (use `0` or rely on default in config when `0` means “use YAML”—the binary uses `0` to mean “use config default” for `--interval`)
+
+---
+
+## 6. JSON reports (`block` and `test` only)
+
+With **`-json`**, reports are written under **`reports/`** (created if needed), timestamped, pretty-printed. Errors still go to **stderr**; normal logging stays out of the JSON file path as designed for scripting.
+
 ```bash
-monitor
-```
-Monitor all providers continuously with automatic refresh. Useful during network congestion or major events.
-
-### Verify historical data consistency
-```bash
-snapshot 19000000
-```
-Ensure all providers agree on historical block data (important for reorgs).
-
-### Automated monitoring script
-```bash
-#!/bin/bash
-# Run every 5 minutes via cron
-test --samples 3 > /var/log/rpc-health.log
-snapshot latest >> /var/log/rpc-health.log
+./bin/block latest -json
+./bin/test -json
 ```
 
-## Why This Matters
+---
 
-**RPC latency directly impacts trading P&L.** In competitive markets, the speed at which you receive blockchain data determines whether you capture opportunities or miss them entirely.
+## 7. Caching and connection behavior
 
-### RPC Performance Tiers
+This project does **not** keep an application-level cache of RPC responses (no memoized blocks, heights, or JSON in memory across commands). Anything that looks like “caching” falls into a few other buckets:
 
-| Deployment Model | Typical Latency | Monthly Cost | Use Case |
-|-----------------|-----------------|--------------|-----------|
-| Self-hosted node | 1-5ms | $500-2000 | High-frequency trading, MEV |
-| Enterprise SLA (Alchemy, Infura) | 20-50ms | $50-500 | Production apps, wallets |
-| Free public endpoints | 100-500ms | Free | Development, testing |
+### HTTP connection reuse (Go `net/http`)
 
-### Real-World Impact
+Each provider uses an `rpc.Client` wrapping the standard library **`http.Client`**. The default **`http.Transport`** keeps a small **connection pool** (TCP + TLS session reuse) for the lifetime of that client. The first request on a new client pays DNS, TCP, and TLS setup; later requests on the **same** client often reuse the open connection, so latency drops.
 
-Consider an arbitrage opportunity that exists for 200ms:
+### Warm-up requests (measurement technique, not data cache)
 
-```
-Block N arrives → Opportunity detected → Execute trade
-```
+**`block`**, **`test`**, and **`snapshot`** each issue at least one **discarded** `eth_blockNumber` (or equivalent) call before the timings you care about. That **warms** the connection so measured latencies reflect **steady-state** RPC work instead of one-off handshake cost. Those warm-up results are **not** written into percentile stats or JSON sample arrays.
 
-**With self-hosted node (3ms latency):**
-- Receive block: 3ms
-- Analyze: 10ms
-- Submit tx: 3ms
-- **Total: 16ms** — Trade executes, profit captured
+### Where one client is reused
 
-**With free public RPC (300ms latency):**
-- Receive block: 300ms
-- Analyze: 10ms
-- Submit tx: 300ms
-- **Total: 610ms** — Opportunity gone, capital wasted
+- **`test`**: One `rpc.NewClient` per provider for that provider’s entire run (warm-up + all samples), so samples share the same underlying connection pool.
+- **`snapshot`**: One client per provider; warm-up `BlockNumber` then measured `GetBlock` share the pool.
+- **`block` (auto-select)**: Phase 1 races all providers with separate clients; the **winning** provider’s client is **kept** and reused for warm-up + `GetBlock`, so the connection opened during selection is reused for the fetch.
 
-**Cost of slowness:** Lost arbitrage = $50-500 per opportunity. With 10-50 opportunities per day, this compounds to $15k-750k monthly.
+### Where reuse is intentionally avoided
 
-## Architecture
+**`monitor`** creates a **new** `rpc.Client` on **every** refresh cycle. That is deliberate: each tick’s latency includes a more **end-to-end** picture (often including connection setup again), which matches “how expensive is a cold-ish poll right now?” rather than only warmed pooled calls.
 
-```
-cmd/                             # One binary per command
-├── block/main.go                # Block inspector (fetch and display blocks)
-├── test/main.go                 # Health check (tail latency metrics)
-├── snapshot/main.go             # Fork detection (block comparison)
-└── monitor/main.go              # Continuous monitoring (real-time dashboard)
+### Provider-side caching (outside this repo)
 
-internal/                        # Shared private packages
-├── rpc/
-│   ├── types.go                 # JSON-RPC protocol + block data structures
-│   ├── client.go                # HTTP client with latency measurement
-│   └── format.go                # Hex parsing, number/timestamp formatting
-├── config/
-│   └── config.go                # YAML loader with env var expansion
-└── format/
-    ├── colors.go                # ANSI color helpers + padding utilities
-    ├── block.go                 # Single-block display renderer
-    ├── test.go                  # Test results table + percentile calculation
-    ├── snapshot.go              # Snapshot comparison + mismatch detection
-    └── monitor.go               # Live dashboard renderer
+RPC vendors and HTTP stacks may cache responses or serve slightly **stale** data. That can show up in **`snapshot`** as height/hash skew between providers even when your code is correct. The tool does not send cache-busting headers or control CDN behavior; treat odd consensus rows as a signal about the endpoint, not about the CLI.
 
-config/
-└── providers.yaml               # Provider configuration (single source of truth)
-```
+---
 
-**Design principles:**
-- No external dependencies for RPC (just `net/http`)
-- Simplified design (no retry logic, no client pooling)
-- Configuration via YAML with env variable expansion
-- Pure functions for parsing and formatting
-- Color-coded terminal output for quick visual assessment
-- Concurrent execution using `golang.org/x/sync/errgroup`
-- Warm-up requests in test/snapshot to eliminate connection overhead
-- Extensive inline documentation designed as a guided walkthrough
+## 8. Quick sanity checklist
 
-## Troubleshooting
+| Step | Check |
+|------|--------|
+| Config exists | `ls config/providers.yaml` |
+| Keys expanded | URLs should not contain literal `${...}` if the var is set |
+| Build | `make build` completes |
+| First run | `./bin/test --samples 3` |
 
-### "provider 'X' not found in config"
-Check that `config/providers.yaml` includes a provider with that exact name.
+---
 
-### "failed to read config: no such file"
-Specify config path: `block --config /path/to/providers.yaml`
+## 9. Troubleshooting
 
-### "defaults.timeout is required"
-Add `defaults` section to `providers.yaml` with required fields:
-- `timeout`: Request timeout (e.g., `10s`)
-- `health_samples`: Default samples for test command (e.g., `30`)
-- `watch_interval`: Default refresh interval for monitor (e.g., `30s`)
+| Symptom | What to try |
+|--------|--------------|
+| `failed to read config: no such file` | Copy the example YAML; or `./bin/block --config /absolute/path/to/providers.yaml` |
+| Empty or broken URLs after expansion | Set env vars or `.env`; confirm names match `${VAR}` in YAML |
+| `provider 'x' not found` | Name in `--provider` must match `name:` in YAML exactly |
+| Very slow first request | Normal; `test` / `snapshot` warm-up hides part of that for measurements |
 
-### All providers showing high latency
-- Check your internet connection
-- Try `curl https://cloudflare-eth.com` to test basic connectivity
-- Verify no firewall blocking outbound HTTPS
+---
 
-### Hash mismatch on recent blocks
-This is normal during chain reorganizations (reorgs). If it persists for >5 blocks, one provider may be on a stale fork.
+## 10. Project layout (short)
 
-### Height mismatch in snapshot output
-If providers show different block heights for `latest`, some providers are lagging behind. This is common with free public endpoints during high network activity. Consider using paid providers with SLAs for production systems.
+| Path | Role |
+|------|------|
+| `cmd/block`, `cmd/test`, `cmd/snapshot`, `cmd/monitor` | CLI entrypoints |
+| `internal/rpc` | HTTP JSON-RPC client, types, hex/format helpers |
+| `internal/config` | YAML load + env expansion |
+| `internal/format` | Terminal output |
+| `config/providers.yaml.example` | Template for your `providers.yaml` |
 
-## Performance Considerations
-
-### How fast is "fast enough"?
-
-| Use Case | Acceptable Latency | Recommended Setup |
-|----------|-------------------|-------------------|
-| High-frequency trading | <10ms | Self-hosted node in same datacenter |
-| MEV / arbitrage | <50ms | Self-hosted or premium tier |
-| Production dApps | <200ms | Paid RPC with SLA |
-| Wallets, explorers | <500ms | Free tier acceptable |
-| Development | <1000ms | Any endpoint |
-
-### Cost vs Performance
-
-Don't over-optimize. Calculate your expected revenue impact:
-
-```
-Monthly savings from 50ms → 5ms = (opportunities captured) * (avg profit)
-Cost of self-hosted node = $500-2000/mo
-
-ROI = Monthly savings - Node cost
-```
-
-If ROI < 0, stick with paid RPC. If ROI > 0, consider self-hosting.
-
-## Code Documentation
-
-This project includes extensive inline documentation modeled as a guided walkthrough:
-
-- **File-level headers**: Every file explains its system role, architecture position, and data flow
-- **Section-level commentary**: Major blocks are introduced with intent, sequence, and rationale
-- **Function-level docs**: Parameters, return values, and invariants are documented
-- **Pointer deep-dives**: Every `*` and `&` is explained with ASCII memory diagrams
-- **CS concept callouts**: Concurrency, closures, channels, and escape analysis are taught in context
-
-The codebase is designed to be read as a learning resource — a guided walkthrough of a real-world system.
+---
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues or questions:
-- GitHub Issues: https://github.com/dando385/eth-rpc-monitor/issues
-- Read the code: It's intentionally simple and extensively commented
-
-## Acknowledgments
-
-Built for teams who treat blockchain infrastructure as production-critical and need observability into their RPC dependencies.
+MIT.
