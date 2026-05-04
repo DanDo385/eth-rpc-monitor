@@ -38,7 +38,7 @@
 //           ├─ Fetch block (GetBlock)     ← The actual data fetch
 //           │
 //           └─ Output:
-//               ├─ --json flag? → convertBlockToJSON() → writeJSON()
+//               ├─ --json flag? → convertBlockToJSON() → reportjson.Write()
 //               └─ Terminal?    → format.FormatBlock()
 //
 // ARCHITECTURE: THE CMD PATTERN
@@ -68,7 +68,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"math/big"
@@ -82,6 +81,7 @@ import (
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/format"
+	"github.com/dando385/eth-rpc-monitor/internal/reportjson"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
@@ -109,14 +109,14 @@ import (
 //
 // In memory:
 //
-//   Post-London block:              Pre-London block:
-//   ┌──────────────────┐            ┌──────────────────┐
-//   │ BlockJSON        │            │ BlockJSON        │
-//   │  BaseFeePerGas:──┼──▶ 25.43  │  BaseFeePerGas:──┼──▶ nil (omitted)
-//   └──────────────────┘            └──────────────────┘
+//	Post-London block:              Pre-London block:
+//	┌──────────────────┐            ┌──────────────────┐
+//	│ BlockJSON        │            │ BlockJSON        │
+//	│  BaseFeePerGas:──┼──▶ 25.43  │  BaseFeePerGas:──┼──▶ nil (omitted)
+//	└──────────────────┘            └──────────────────┘
 //
-//   JSON output:                     JSON output:
-//   { "baseFeePerGas": 25.43, ... }  { ... }  ← field absent entirely
+//	JSON output:                     JSON output:
+//	{ "baseFeePerGas": 25.43, ... }  { ... }  ← field absent entirely
 //
 // If we used plain float64, the field would appear as 0.0 in the JSON for
 // pre-London blocks, which is misleading (0.0 gwei is a valid fee, but
@@ -133,52 +133,15 @@ type BlockJSON struct {
 }
 
 // =============================================================================
-// SECTION 2: JSON Report Writing
-// =============================================================================
-
-// writeJSON writes any JSON-serializable data to a timestamped file in reports/.
-//
-// PARAMETER: data interface{}
-// ===========================
-// The `interface{}` type (Go's "any" type) means this function accepts ANY
-// value. The JSON encoder uses reflection to inspect the actual type at
-// runtime and serialize its fields accordingly. This lets us reuse writeJSON
-// for BlockJSON, TestReport, or any other struct.
-//
-// The prefix parameter creates filenames like:
-//   "reports/block-20240115-143218.json"
-//   "reports/health-20240115-143218.json"
-//
-// TIME FORMAT: "20060102-150405"
-// ==============================
-// Go's reference time (Mon Jan 2 15:04:05 MST 2006) encoded here produces:
-//   Year: 2006 → actual year
-//   Month: 01 → zero-padded month
-//   Day: 02 → zero-padded day
-//   Hour: 15 → 24-hour format
-//   Minute: 04 → zero-padded minute
-//   Second: 05 → zero-padded second
-func writeJSON(data interface{}, prefix string) (string, error) {
-	os.MkdirAll("reports", 0755)
-	filename := fmt.Sprintf("reports/%s-%s.json", prefix, time.Now().Format("20060102-150405"))
-	file, _ := os.Create(filename)
-	defer file.Close()
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	enc.Encode(data)
-	return filename, nil
-}
-
-// =============================================================================
-// SECTION 3: Block Data Conversion for JSON Export
+// SECTION 2: Block Data Conversion for JSON Export
 // =============================================================================
 
 // convertBlockToJSON transforms a raw RPC Block into a JSON-friendly format.
 //
 // This function bridges three representations:
-//   1. rpc.Block (hex strings from the wire)
-//   2. Native Go types (uint64, *big.Int)
-//   3. BlockJSON (decimal numbers, ISO timestamps, gwei units)
+//  1. rpc.Block (hex strings from the wire)
+//  2. Native Go types (uint64, *big.Int)
+//  3. BlockJSON (decimal numbers, ISO timestamps, gwei units)
 //
 // PARAMETER: block *rpc.Block
 // ===========================
@@ -191,18 +154,18 @@ func writeJSON(data interface{}, prefix string) (string, error) {
 // This function contains one of the most instructive pointer patterns in the
 // codebase: creating a *float64 from a local variable.
 //
-//   gweiFloat, _ := gwei.Float64()  ← gweiFloat is a float64 VALUE (on stack)
-//   baseFeePerGas = &gweiFloat      ← & takes its address, creating a *float64
+//	gweiFloat, _ := gwei.Float64()  ← gweiFloat is a float64 VALUE (on stack)
+//	baseFeePerGas = &gweiFloat      ← & takes its address, creating a *float64
 //
 // In memory:
 //
-//   BEFORE &gweiFloat:              AFTER &gweiFloat:
-//   Stack                           Stack
-//   ┌──────────────────┐            ┌──────────────────┐
-//   │ gweiFloat: 25.43 │            │ gweiFloat: 25.43 │ ← still here
-//   └──────────────────┘            └──────────────────┘
-//                                        ▲
-//   baseFeePerGas: nil              baseFeePerGas: ───┘ (points to gweiFloat)
+//	BEFORE &gweiFloat:              AFTER &gweiFloat:
+//	Stack                           Stack
+//	┌──────────────────┐            ┌──────────────────┐
+//	│ gweiFloat: 25.43 │            │ gweiFloat: 25.43 │ ← still here
+//	└──────────────────┘            └──────────────────┘
+//	                                     ▲
+//	baseFeePerGas: nil              baseFeePerGas: ───┘ (points to gweiFloat)
 //
 // Go's escape analysis detects that gweiFloat's address is stored in a struct
 // field that outlives this scope, so it allocates gweiFloat on the heap
@@ -261,7 +224,7 @@ func convertBlockToJSON(block *rpc.Block) BlockJSON {
 }
 
 // =============================================================================
-// SECTION 4: Provider Selection — Finding the Fastest Provider
+// SECTION 3: Provider Selection — Finding the Fastest Provider
 // =============================================================================
 
 // providerResult holds the outcome of a single provider's block number query
@@ -281,13 +244,14 @@ type providerResult struct {
 //
 // ALGORITHM: Two-phase selection
 // ==============================
-//   Phase 1 — Concurrent Discovery:
-//     Query ALL providers simultaneously to get their block numbers and latencies.
-//     This uses Go's errgroup for structured concurrency (see below).
 //
-//   Phase 2 — Selection:
-//     a) Find the highest block number across all successful responses.
-//     b) Among providers ON that highest block, pick the one with lowest latency.
+//	Phase 1 — Concurrent Discovery:
+//	  Query ALL providers simultaneously to get their block numbers and latencies.
+//	  This uses Go's errgroup for structured concurrency (see below).
+//
+//	Phase 2 — Selection:
+//	  a) Find the highest block number across all successful responses.
+//	  b) Among providers ON that highest block, pick the one with lowest latency.
 //
 // Why not just pick the fastest regardless of block height?
 // Because a provider might be fast but STALE — returning old data.
@@ -297,39 +261,39 @@ type providerResult struct {
 // =========================================
 // This function demonstrates Go's structured concurrency pattern:
 //
-//   errgroup.WithContext(ctx) creates:
-//     1. A Group `g` that manages goroutine lifecycle
-//     2. A derived context `gctx` that is cancelled if any goroutine returns an error
+//	errgroup.WithContext(ctx) creates:
+//	  1. A Group `g` that manages goroutine lifecycle
+//	  2. A derived context `gctx` that is cancelled if any goroutine returns an error
 //
-//   g.Go(func() error { ... }) launches a goroutine managed by the group.
-//   g.Wait() blocks until ALL goroutines complete.
+//	g.Go(func() error { ... }) launches a goroutine managed by the group.
+//	g.Wait() blocks until ALL goroutines complete.
 //
-//   The sync.Mutex `mu` protects the shared `results` and `clients` slices.
-//   Even though each goroutine writes to a DIFFERENT index (results[i]),
-//   the Go race detector considers any concurrent slice access a data race.
-//   The mutex makes this safe and explicit.
+//	The sync.Mutex `mu` protects the shared `results` and `clients` slices.
+//	Even though each goroutine writes to a DIFFERENT index (results[i]),
+//	the Go race detector considers any concurrent slice access a data race.
+//	The mutex makes this safe and explicit.
 //
 // In memory during concurrent execution:
 //
-//   Main goroutine                 Worker goroutines (one per provider)
-//   ┌───────────────┐
-//   │ g.Wait()      │             ┌─────────────────────┐
-//   │ (blocking)    │             │ goroutine 0          │
-//   └───────────────┘             │  query alchemy       │
-//                                 │  mu.Lock()           │
-//                                 │  results[0] = ...    │
-//                                 │  clients[0] = ...    │
-//                                 │  mu.Unlock()         │
-//                                 └─────────────────────┘
-//                                 ┌─────────────────────┐
-//                                 │ goroutine 1          │
-//                                 │  query infura        │
-//                                 │  mu.Lock()           │
-//                                 │  results[1] = ...    │
-//                                 │  clients[1] = ...    │
-//                                 │  mu.Unlock()         │
-//                                 └─────────────────────┘
-//                                 ... (one per provider)
+//	Main goroutine                 Worker goroutines (one per provider)
+//	┌───────────────┐
+//	│ g.Wait()      │             ┌─────────────────────┐
+//	│ (blocking)    │             │ goroutine 0          │
+//	└───────────────┘             │  query alchemy       │
+//	                              │  mu.Lock()           │
+//	                              │  results[0] = ...    │
+//	                              │  clients[0] = ...    │
+//	                              │  mu.Unlock()         │
+//	                              └─────────────────────┘
+//	                              ┌─────────────────────┐
+//	                              │ goroutine 1          │
+//	                              │  query infura        │
+//	                              │  mu.Lock()           │
+//	                              │  results[1] = ...    │
+//	                              │  clients[1] = ...    │
+//	                              │  mu.Unlock()         │
+//	                              └─────────────────────┘
+//	                              ... (one per provider)
 //
 // RETURN TYPE: (*rpc.Client, error)
 // ==================================
@@ -347,9 +311,9 @@ type providerResult struct {
 // The shadowing creates NEW variables `i` and `p` that are LOCAL to each
 // iteration, captured by the closure:
 //
-//   Iteration 0: captures i=0, p=alchemy   (own copy)
-//   Iteration 1: captures i=1, p=infura    (own copy)
-//   Iteration 2: captures i=2, p=llamanodes (own copy)
+//	Iteration 0: captures i=0, p=alchemy   (own copy)
+//	Iteration 1: captures i=1, p=infura    (own copy)
+//	Iteration 2: captures i=2, p=llamanodes (own copy)
 //
 // This is one of Go's most well-known gotchas. Starting in Go 1.22, the
 // loop variable semantics changed to make each iteration create new variables
@@ -436,36 +400,35 @@ func selectFastestProvider(ctx context.Context, cfg *config.Config) (*rpc.Client
 }
 
 // =============================================================================
-// SECTION 5: Block Argument Normalization
+// SECTION 4: Block Argument Normalization
 // =============================================================================
 
 // normalizeBlockArg converts a user-provided block identifier into the format
 // expected by the Ethereum JSON-RPC API.
 //
 // The Ethereum RPC accepts block identifiers in two forms:
-//   1. Special tags: "latest", "pending", "earliest"
-//   2. Hex-encoded numbers: "0x10d4f"
+//  1. Special tags: "latest", "pending", "earliest"
+//  2. Hex-encoded numbers: "0x10d4f"
 //
 // But users naturally type decimal numbers ("19000000"), so we need to convert.
 //
 // Conversion logic:
-//   ""           → "latest"     (default)
-//   "latest"     → "latest"     (pass-through)
-//   "pending"    → "pending"    (pass-through, note: currently mapped to "latest")
-//   "earliest"   → "earliest"   (pass-through, note: currently mapped to "latest")
-//   "0x121eac0"  → "0x121eac0"  (already hex, pass-through)
-//   "19000000"   → "0x121eac0"  (decimal → hex conversion)
-//   "garbage"    → "garbage"    (invalid — let the RPC server return an error)
 //
-// Note: The current implementation maps "pending" and "earliest" to "latest"
-// since they share the same conditional branch. The Ethereum RPC would handle
-// them correctly if passed through individually.
+//	""           → "latest"     (default)
+//	"latest"     → "latest"     (pass-through)
+//	"pending"    → "pending"    (pass-through)
+//	"earliest"   → "earliest"   (pass-through)
+//	"0x121eac0"  → "0x121eac0"  (already hex, pass-through)
+//	"19000000"   → "0x121eac0"  (decimal → hex conversion)
+//	"garbage"    → "garbage"    (invalid — let the RPC server return an error)
 func normalizeBlockArg(arg string) string {
 	arg = strings.TrimSpace(strings.ToLower(arg))
 
-	// Handle special block tags.
-	if arg == "latest" || arg == "pending" || arg == "earliest" || arg == "" {
+	if arg == "" {
 		return "latest"
+	}
+	if arg == "latest" || arg == "pending" || arg == "earliest" {
+		return arg
 	}
 
 	// If already hex-encoded (starts with "0x"), pass through unchanged.
@@ -490,16 +453,16 @@ func normalizeBlockArg(arg string) string {
 }
 
 // =============================================================================
-// SECTION 6: Main Logic — The runBlock Function
+// SECTION 5: Main Logic — The runBlock Function
 // =============================================================================
 
 // runBlock executes the block inspection workflow.
 //
 // This is the core orchestrator for the block command. It handles:
-//   1. Provider selection (manual or automatic)
-//   2. Connection warm-up
-//   3. Block fetching
-//   4. Output formatting (terminal or JSON)
+//  1. Provider selection (manual or automatic)
+//  2. Connection warm-up
+//  3. Block fetching
+//  4. Output formatting (terminal or JSON)
 //
 // PARAMETER: cfg *config.Config
 // =============================
@@ -590,7 +553,7 @@ func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) e
 	if jsonOut {
 		// JSON export: convert to JSON-friendly format and write to file.
 		blockJSON := convertBlockToJSON(block)
-		filepath, err := writeJSON(blockJSON, "block")
+		filepath, err := reportjson.Write(blockJSON, "block")
 		if err != nil {
 			return fmt.Errorf("failed to write JSON report: %w", err)
 		}
@@ -606,7 +569,7 @@ func runBlock(cfg *config.Config, blockArg, providerName string, jsonOut bool) e
 }
 
 // =============================================================================
-// SECTION 7: Entry Point — main()
+// SECTION 6: Entry Point — main()
 // =============================================================================
 //
 // main() is the program's entry point. In Go, every executable must have

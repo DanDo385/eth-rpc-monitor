@@ -67,18 +67,19 @@ import (
 // ParseHexUint64 converts a hex-encoded string (e.g., "0x1444F3B") to a uint64.
 //
 // Step-by-step:
-//   1. strings.TrimPrefix removes the "0x" prefix, leaving "1444F3B"
-//   2. strconv.ParseUint interprets "1444F3B" as base-16, fitting it into 64 bits
-//   3. Returns the resulting uint64 value and any parsing error
+//  1. strings.TrimPrefix removes the "0x" prefix, leaving "1444F3B"
+//  2. strconv.ParseUint interprets "1444F3B" as base-16, fitting it into 64 bits
+//  3. Returns the resulting uint64 value and any parsing error
 //
 // The third parameter to ParseUint (16) specifies base-16 (hexadecimal).
 // The fourth parameter (64) specifies the bit size — the result must fit
 // in 64 bits, or an overflow error is returned.
 //
 // Example:
-//   ParseHexUint64("0x1444F3B") → (21,233,467, nil)
-//   ParseHexUint64("0xZZZ")    → (0, error)   ← invalid hex
-//   ParseHexUint64("")          → (0, error)   ← empty string
+//
+//	ParseHexUint64("0x1444F3B") → (21,233,467, nil)
+//	ParseHexUint64("0xZZZ")    → (0, error)   ← invalid hex
+//	ParseHexUint64("")          → (0, error)   ← empty string
 func ParseHexUint64(hex string) (uint64, error) {
 	return strconv.ParseUint(strings.TrimPrefix(hex, "0x"), 16, 64)
 }
@@ -90,25 +91,25 @@ func ParseHexUint64(hex string) (uint64, error) {
 // This function returns *big.Int (a POINTER to big.Int). Here's what happens
 // in memory, step by step:
 //
-//   1. new(big.Int) allocates a big.Int on the HEAP and returns a pointer to it.
+//  1. new(big.Int) allocates a big.Int on the HEAP and returns a pointer to it.
 //
-//      Stack                       Heap
-//      ┌─────────────┐            ┌─────────────┐
-//      │ val: ────────┼───────────▶│ big.Int     │
-//      └─────────────┘            │ value: 0    │
-//                                 └─────────────┘
+//     Stack                       Heap
+//     ┌─────────────┐            ┌─────────────┐
+//     │ val: ────────┼───────────▶│ big.Int     │
+//     └─────────────┘            │ value: 0    │
+//     └─────────────┘
 //
-//   2. val.SetString("59682F000", 16) parses the hex string and MUTATES the
-//      big.Int in place — it doesn't create a new one.
+//  2. val.SetString("59682F000", 16) parses the hex string and MUTATES the
+//     big.Int in place — it doesn't create a new one.
 //
-//      Stack                       Heap
-//      ┌─────────────┐            ┌────────────────┐
-//      │ val: ────────┼───────────▶│ big.Int        │
-//      └─────────────┘            │ value: 24000...│  ← mutated
-//                                 └────────────────┘
+//     Stack                       Heap
+//     ┌─────────────┐            ┌────────────────┐
+//     │ val: ────────┼───────────▶│ big.Int        │
+//     └─────────────┘            │ value: 24000...│  ← mutated
+//     └────────────────┘
 //
-//   3. return val — returns the POINTER (the address), not the big.Int itself.
-//      The caller receives the same address, pointing to the same heap object.
+//  3. return val — returns the POINTER (the address), not the big.Int itself.
+//     The caller receives the same address, pointing to the same heap object.
 //
 // Why use new() instead of a stack-allocated big.Int?
 //   - big.Int is designed to be used as a pointer type in Go's math/big package.
@@ -136,14 +137,14 @@ func ParseHexBigInt(hex string) *big.Int {
 // Example output: "2024-01-15 14:32:18 UTC (12s ago)"
 //
 // Step-by-step:
-//   1. time.Unix(int64(ts), 0) creates a time.Time from the Unix timestamp.
-//      The int64() cast is needed because time.Unix takes int64, but our
-//      timestamp is uint64. This is safe because Unix timestamps won't
-//      exceed int64's max value until the year 292,277,026,596.
-//   2. .UTC() converts to UTC timezone (Ethereum uses UTC for consistency).
-//   3. time.Since(t) calculates the duration between then and now.
-//   4. .Truncate(time.Second) rounds down to whole seconds (removes nanoseconds).
-//   5. t.Format("2006-01-02 15:04:05 UTC") formats the time.
+//  1. time.Unix(int64(ts), 0) creates a time.Time from the Unix timestamp.
+//     The int64() cast is needed because time.Unix takes int64, but our
+//     timestamp is uint64. This is safe because Unix timestamps won't
+//     exceed int64's max value until the year 292,277,026,596.
+//  2. .UTC() converts to UTC timezone (Ethereum uses UTC for consistency).
+//  3. time.Since(t) calculates the duration between then and now.
+//  4. .Truncate(time.Second) rounds down to whole seconds (removes nanoseconds).
+//  5. t.Format("2006-01-02 15:04:05 UTC") formats the time.
 //
 // GO'S TIME FORMAT REFERENCE DATE
 // ================================
@@ -163,11 +164,11 @@ func FormatTimestamp(ts uint64) string {
 // Example: FormatNumber(21234567) → "21,234,567"
 //
 // Algorithm walkthrough:
-//   1. Convert the number to its decimal string representation: "21234567"
-//   2. If the string is 3 characters or fewer, return it as-is (no commas needed).
-//   3. Walk through the string character by character. Before each character
-//      (except the first), check: "If I count from the END of the string back
-//      to this position, is it a multiple of 3?" If yes, insert a comma.
+//  1. Convert the number to its decimal string representation: "21234567"
+//  2. If the string is 3 characters or fewer, return it as-is (no commas needed).
+//  3. Walk through the string character by character. Before each character
+//     (except the first), check: "If I count from the END of the string back
+//     to this position, is it a multiple of 3?" If yes, insert a comma.
 //
 // The key insight is the expression (len(s) - i) % 3 == 0:
 //   - For "21234567" (len=8), at position i=2: (8-2)%3 = 6%3 = 0 → comma before '2'
@@ -207,27 +208,27 @@ func FormatNumber(n uint64) string {
 //
 // In memory when called with a valid fee:
 //
-//   Stack (FormatGwei)              Heap
-//   ┌──────────────┐              ┌────────────────┐
-//   │ wei: ────────┼──────────────▶│ big.Int        │
-//   └──────────────┘              │ 24000000000    │  ← 24 Gwei in wei
-//                                 └────────────────┘
+//	Stack (FormatGwei)              Heap
+//	┌──────────────┐              ┌────────────────┐
+//	│ wei: ────────┼──────────────▶│ big.Int        │
+//	└──────────────┘              │ 24000000000    │  ← 24 Gwei in wei
+//	                              └────────────────┘
 //
-//   After division (new allocations — original is NOT modified):
+//	After division (new allocations — original is NOT modified):
 //
-//   Stack                          Heap
-//   ┌──────────────┐              ┌────────────────┐
-//   │ gwei: ───────┼──────────────▶│ big.Float      │
-//   └──────────────┘              │ value: 24.0    │  ← new allocation
-//                                 └────────────────┘
+//	Stack                          Heap
+//	┌──────────────┐              ┌────────────────┐
+//	│ gwei: ───────┼──────────────▶│ big.Float      │
+//	└──────────────┘              │ value: 24.0    │  ← new allocation
+//	                              └────────────────┘
 //
 // UNIT CONVERSION CHAIN
 // =====================
 // Ethereum gas economics use "wei" as the atomic unit (like cents to dollars):
 //
-//   1 ETH  = 1,000,000,000 Gwei  (10^9)
-//   1 Gwei = 1,000,000,000 wei   (10^9)
-//   1 ETH  = 10^18 wei
+//	1 ETH  = 1,000,000,000 Gwei  (10^9)
+//	1 Gwei = 1,000,000,000 wei   (10^9)
+//	1 ETH  = 10^18 wei
 //
 // Base fees are typically in the range of 10-100 Gwei, but they're stored
 // as wei on-chain. So we divide by 10^9 to convert to the unit humans use.

@@ -137,14 +137,15 @@ import (
 //
 // PARAMETERS
 // ==========
-// - ctx context.Context: The cancellable context from runMonitor.
-//   If the user presses Ctrl+C, this context is cancelled, which causes
-//   all in-flight HTTP requests to abort immediately.
 //
-// - cfg *config.Config: POINTER to the configuration.
-//   The `*` means we receive the memory address. We read cfg.Providers
-//   to know which providers to query. The pointer avoids copying the
-//   Config struct (which contains a slice of providers) on every call.
+//   - ctx context.Context: The cancellable context from runMonitor.
+//     If the user presses Ctrl+C, this context is cancelled, which causes
+//     all in-flight HTTP requests to abort immediately.
+//
+//   - cfg *config.Config: POINTER to the configuration.
+//     The `*` means we receive the memory address. We read cfg.Providers
+//     to know which providers to query. The pointer avoids copying the
+//     Config struct (which contains a slice of providers) on every call.
 //
 // CONCURRENCY MODEL
 // =================
@@ -214,11 +215,11 @@ func fetchAllProviders(ctx context.Context, cfg *config.Config) []format.WatchRe
 //
 // This is the most architecturally interesting function in the codebase.
 // It combines several concurrent programming patterns:
-//   1. CONTEXT CANCELLATION for cooperative shutdown
-//   2. SIGNAL HANDLING for Ctrl+C detection
-//   3. TICKER-BASED TIMING for periodic refresh
-//   4. SELECT-BASED EVENT LOOP for multiplexed event handling
-//   5. CLOSURE for stateful rendering (firstDisplay tracking)
+//  1. CONTEXT CANCELLATION for cooperative shutdown
+//  2. SIGNAL HANDLING for Ctrl+C detection
+//  3. TICKER-BASED TIMING for periodic refresh
+//  4. SELECT-BASED EVENT LOOP for multiplexed event handling
+//  5. CLOSURE for stateful rendering (firstDisplay tracking)
 //
 // PARAMETER: cfg *config.Config
 // =============================

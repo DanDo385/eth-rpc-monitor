@@ -152,14 +152,14 @@ type Request struct {
 //
 // In memory:
 //
-//   Successful response:          Error response:
-//   ┌──────────────┐              ┌──────────────┐
-//   │ Response     │              │ Response     │
-//   │  Error: nil ─┼─▶ (nothing) │  Error: ─────┼──▶ ┌───────────┐
-//   └──────────────┘              └──────────────┘    │ RPCError  │
-//                                                     │ Code: -32600│
-//                                                     │ Msg: "..." │
-//                                                     └───────────┘
+//	Successful response:          Error response:
+//	┌──────────────┐              ┌──────────────┐
+//	│ Response     │              │ Response     │
+//	│  Error: nil ─┼─▶ (nothing) │  Error: ─────┼──▶ ┌───────────┐
+//	└──────────────┘              └──────────────┘    │ RPCError  │
+//	                                                  │ Code: -32600│
+//	                                                  │ Msg: "..." │
+//	                                                  └───────────┘
 //
 // The `omitempty` tag in the JSON annotation means: when serializing TO JSON,
 // omit this field if the pointer is nil. When deserializing FROM JSON, if the
@@ -174,11 +174,12 @@ type Response struct {
 // RPCError represents an error returned by the Ethereum JSON-RPC server.
 //
 // Standard error codes from the JSON-RPC 2.0 specification:
-//   -32700  Parse error       — Invalid JSON
-//   -32600  Invalid request   — JSON is valid but not a proper request
-//   -32601  Method not found  — Method does not exist
-//   -32602  Invalid params    — Invalid method parameters
-//   -32603  Internal error    — Server-side error
+//
+//	-32700  Parse error       — Invalid JSON
+//	-32600  Invalid request   — JSON is valid but not a proper request
+//	-32601  Method not found  — Method does not exist
+//	-32602  Invalid params    — Invalid method parameters
+//	-32603  Internal error    — Server-side error
 //
 // Ethereum nodes may also return custom error codes (e.g., -32000 for
 // execution reverted). The Message field contains a human-readable

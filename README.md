@@ -111,7 +111,7 @@ Hits every provider repeatedly, prints a summary table (P50 / P95 / P99 / Max), 
 ```bash
 ./bin/test                     # sample count from config (health_samples)
 ./bin/test --samples 10
-./bin/test --json              # writes reports/test-YYYYMMDD-HHMMSS.json
+./bin/test --json              # writes reports/health-YYYYMMDD-HHMMSS.json
 ```
 
 **Flags:** `--config`, `--samples <n>`, `--json`
@@ -216,6 +216,8 @@ RPC vendors and HTTP stacks may cache responses or serve slightly **stale** data
 | `internal/rpc` | HTTP JSON-RPC client, types, hex/format helpers |
 | `internal/config` | YAML load + env expansion |
 | `internal/format` | Terminal output |
+| `internal/reportjson` | Timestamped JSON reports (`block`, `test` `-json`) |
+| `docs/architecture.md` | High-level module diagram |
 | `config/providers.yaml.example` | Template for your `providers.yaml` |
 
 ---

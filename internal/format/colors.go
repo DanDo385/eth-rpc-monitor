@@ -128,15 +128,17 @@ var (
 // The regex pattern: \x1b\[[0-9;]*[a-zA-Z]
 //
 // Breaking it down:
-//   \x1b     → The ESC character (byte 0x1B / decimal 27)
-//   \[       → A literal '[' character
-//   [0-9;]*  → Zero or more digits and semicolons (the parameters)
-//   [a-zA-Z] → A letter that terminates the sequence (e.g., 'm' for color)
+//
+//	\x1b     → The ESC character (byte 0x1B / decimal 27)
+//	\[       → A literal '[' character
+//	[0-9;]*  → Zero or more digits and semicolons (the parameters)
+//	[a-zA-Z] → A letter that terminates the sequence (e.g., 'm' for color)
 //
 // This matches sequences like:
-//   \x1b[32m     → Green text (parameter: 32, terminator: m)
-//   \x1b[1;31m   → Bold red text (parameters: 1;31, terminator: m)
-//   \x1b[0m      → Reset all formatting
+//
+//	\x1b[32m     → Green text (parameter: 32, terminator: m)
+//	\x1b[1;31m   → Bold red text (parameters: 1;31, terminator: m)
+//	\x1b[0m      → Reset all formatting
 //
 // regexp.MustCompile compiles the regex at program startup (package init time).
 // The "Must" means it panics if the regex is invalid — appropriate here because
@@ -147,9 +149,10 @@ var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 // visible characters.
 //
 // Example:
-//   stripANSI("\x1b[32m45ms\x1b[0m") → "45ms"
-//   len("\x1b[32m45ms\x1b[0m") = 15     ← byte length (includes ANSI codes)
-//   len(stripANSI(...))        = 4      ← visible character count
+//
+//	stripANSI("\x1b[32m45ms\x1b[0m") → "45ms"
+//	len("\x1b[32m45ms\x1b[0m") = 15     ← byte length (includes ANSI codes)
+//	len(stripANSI(...))        = 4      ← visible character count
 //
 // This is used by padRight to calculate how many spaces to add for alignment.
 func stripANSI(str string) string {
@@ -164,14 +167,15 @@ func stripANSI(str string) string {
 // visible character count, so Sprintf would add too few spaces.
 //
 // Example:
-//   greenStr := Green("45ms")       // "\x1b[32m45ms\x1b[0m" (15 bytes, 4 visible)
-//   padRight(greenStr, 10)          // "\x1b[32m45ms\x1b[0m      " (+ 6 spaces)
-//   // Renders as: "45ms      " (10 visible characters, aligned)
+//
+//	greenStr := Green("45ms")       // "\x1b[32m45ms\x1b[0m" (15 bytes, 4 visible)
+//	padRight(greenStr, 10)          // "\x1b[32m45ms\x1b[0m      " (+ 6 spaces)
+//	// Renders as: "45ms      " (10 visible characters, aligned)
 //
 // Algorithm:
-//   1. Strip ANSI codes and measure the visible length
-//   2. If visible length < desired width, append spaces
-//   3. If visible length >= desired width, return unchanged (no truncation)
+//  1. Strip ANSI codes and measure the visible length
+//  2. If visible length < desired width, append spaces
+//  3. If visible length >= desired width, return unchanged (no truncation)
 func padRight(str string, width int) string {
 	visibleLen := len(stripANSI(str))
 	if visibleLen < width {
@@ -192,9 +196,10 @@ func padRight(str string, width int) string {
 // ColorLatency applies traffic-light coloring to a latency value in milliseconds.
 //
 // Color thresholds:
-//   < 100ms  → Green  (fast — suitable for production trading)
-//   < 300ms  → Yellow (moderate — acceptable for most applications)
-//   >= 300ms → Red    (slow — may indicate problems or poor-quality endpoint)
+//
+//	< 100ms  → Green  (fast — suitable for production trading)
+//	< 300ms  → Yellow (moderate — acceptable for most applications)
+//	>= 300ms → Red    (slow — may indicate problems or poor-quality endpoint)
 //
 // These thresholds are chosen based on practical Ethereum RPC experience:
 //   - Premium providers (Alchemy, Infura paid tiers): typically 20-80ms
@@ -219,9 +224,10 @@ func ColorLatency(ms int64) string {
 // It's calculated as: (highest block seen across all providers) - (this provider's block).
 //
 // Color mapping:
-//   0 blocks behind → Dim dash ("—") — provider is at the tip, nothing to report
-//   1 block behind  → Yellow "-1"    — minor lag, may be normal propagation delay
-//   2+ blocks behind → Red "-N"     — significant lag, provider may be stale
+//
+//	0 blocks behind → Dim dash ("—") — provider is at the tip, nothing to report
+//	1 block behind  → Yellow "-1"    — minor lag, may be normal propagation delay
+//	2+ blocks behind → Red "-N"     — significant lag, provider may be stale
 //
 // In Ethereum, new blocks are produced approximately every 12 seconds.
 // Being 1 block behind (12s) is usually normal. Being 2+ blocks behind
@@ -241,9 +247,10 @@ func ColorLag(lag uint64) string {
 // The success rate is calculated as (successful requests / total requests) * 100%.
 //
 // Color mapping:
-//   100%    → Green  (perfect reliability)
-//   80-99%  → Yellow (some failures, worth investigating)
-//   < 80%   → Red    (significant failure rate, provider is unreliable)
+//
+//	100%    → Green  (perfect reliability)
+//	80-99%  → Yellow (some failures, worth investigating)
+//	< 80%   → Red    (significant failure rate, provider is unreliable)
 //
 // The 80% threshold is deliberately conservative. In production trading:
 //   - 99.9% uptime is the minimum for paid providers

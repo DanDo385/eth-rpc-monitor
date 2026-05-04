@@ -97,9 +97,9 @@ import (
 // In Go, an interface defines a set of methods that a type must implement.
 // The `error` interface requires only one method:
 //
-//   type error interface {
-//       Error() string
-//   }
+//	type error interface {
+//	    Error() string
+//	}
 //
 // Any type that has an Error() string method satisfies this interface.
 // Common implementations include:
@@ -110,11 +110,11 @@ import (
 //
 // An interface value in memory has two components:
 //
-//   ┌──────────────────────┐
-//   │ Error (interface)    │
-//   │  type pointer:  ─────┼──▶ type descriptor (e.g., *net.OpError)
-//   │  value pointer: ─────┼──▶ actual error data on heap
-//   └──────────────────────┘
+//	┌──────────────────────┐
+//	│ Error (interface)    │
+//	│  type pointer:  ─────┼──▶ type descriptor (e.g., *net.OpError)
+//	│  value pointer: ─────┼──▶ actual error data on heap
+//	└──────────────────────┘
 //
 // When Error is nil, BOTH pointers are nil — this means "no error."
 // We check this with `r.Error == nil` (or `r.Error != nil`).
@@ -136,16 +136,16 @@ type SnapshotResult struct {
 // FormatSnapshot renders a comparison table and detects block disagreements.
 //
 // This function performs TWO tasks:
-//   1. DISPLAY: Render a table showing each provider's response
-//   2. ANALYSIS: Detect and report height and hash mismatches
+//  1. DISPLAY: Render a table showing each provider's response
+//  2. ANALYSIS: Detect and report height and hash mismatches
 //
 // The analysis uses Go maps as GROUP BY operations — similar to SQL's GROUP BY:
 //
-//   hashGroups:   "0xa1b2..." → ["alchemy", "infura"]
-//                 "0x9876..." → ["llamanodes"]
+//	hashGroups:   "0xa1b2..." → ["alchemy", "infura"]
+//	              "0x9876..." → ["llamanodes"]
 //
-//   heightGroups: 21234567    → ["alchemy", "infura"]
-//                 21234566    → ["llamanodes"]
+//	heightGroups: 21234567    → ["alchemy", "infura"]
+//	              21234566    → ["llamanodes"]
 //
 // If either map has more than one key, there's a mismatch.
 //
@@ -232,18 +232,27 @@ func FormatSnapshot(w io.Writer, results []SnapshotResult) {
 	//   - A stale cache serving old data
 	//   - In rare cases, a consensus failure
 	//
-	// hash[:18] truncates the hash to 18 characters for display. The full
-	// hash is 66 characters (0x + 64 hex digits), which is too long for a
-	// clean table. The truncated form is enough to visually distinguish
-	// different hashes.
+	// shortHash truncates long hashes for display without slicing past EOF.
 	if len(hashGroups) > 1 {
 		fmt.Fprintln(w, Yellow("⚠"), Bold("BLOCK HASH MISMATCH DETECTED:"))
 		for hash, providers := range hashGroups {
-			fmt.Fprintf(w, "  %s...  →  %v\n", hash[:18], providers)
+			prefix := shortHash(hash, 18)
+			if len(prefix) < len(hash) {
+				prefix += "..."
+			}
+			fmt.Fprintf(w, "  %s  →  %v\n", prefix, providers)
 		}
 		fmt.Fprintln(w)
 	} else if len(hashGroups) == 1 {
 		// All providers agree — show a reassuring green checkmark.
 		fmt.Fprintln(w, Green("✓"), "All providers agree on block hash")
 	}
+}
+
+// shortHash returns s if len(s) <= n, otherwise the first n bytes of s (safe for ASCII hex hashes).
+func shortHash(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }

@@ -1,4 +1,4 @@
-.PHONY: build clean install
+.PHONY: build clean install test vet
 
 # Build all binaries into bin/ directory
 build:
@@ -16,3 +16,9 @@ clean:
 
 # Install builds and is an alias for build
 install: build
+
+test:
+	go test ./... -race -count=1
+
+vet:
+	go vet ./...

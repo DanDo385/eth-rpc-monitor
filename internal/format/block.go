@@ -73,30 +73,30 @@ import (
 //
 // - block *rpc.Block: POINTER to the raw block data from the RPC response.
 //
-//   WHY A POINTER (*rpc.Block)?
-//   The `*` in *rpc.Block means "pointer to rpc.Block." This function
-//   receives the MEMORY ADDRESS of the Block struct, not a copy of it.
+//		WHY A POINTER (*rpc.Block)?
+//		The `*` in *rpc.Block means "pointer to rpc.Block." This function
+//		receives the MEMORY ADDRESS of the Block struct, not a copy of it.
 //
-//   In memory:
-//   ┌───────────────────┐     ┌──────────────────────────┐
-//   │ FormatBlock params │     │ Block (on heap)          │
-//   │  block: ──────────┼────▶│  Number: "0x1444F3B"     │
-//   └───────────────────┘     │  Hash: "0xa1b2c3d4..."   │
-//                             │  Transactions: [300 hashes]
-//                             └──────────────────────────┘
+//		In memory:
+//		┌───────────────────┐     ┌──────────────────────────┐
+//		│ FormatBlock params │     │ Block (on heap)          │
+//		│  block: ──────────┼────▶│  Number: "0x1444F3B"     │
+//		└───────────────────┘     │  Hash: "0xa1b2c3d4..."   │
+//		                          │  Transactions: [300 hashes]
+//		                          └──────────────────────────┘
 //
-//   If we passed Block by value (without *), Go would COPY the entire struct
-//   including the Transactions slice header. The pointer avoids this copy.
-//   Since FormatBlock only reads the block (doesn't modify it), the choice
-//   of pointer vs value doesn't affect correctness — but pointer is more
-//   efficient and conventional for struct parameters.
+//		If we passed Block by value (without *), Go would COPY the entire struct
+//		including the Transactions slice header. The pointer avoids this copy.
+//		Since FormatBlock only reads the block (doesn't modify it), the choice
+//		of pointer vs value doesn't affect correctness — but pointer is more
+//		efficient and conventional for struct parameters.
 //
-// - provider string: The name of the provider that served this block.
-//   Strings in Go are immutable and cheap to copy (they're internally a
-//   pointer + length, 16 bytes total), so passing by value is fine.
+//	  - provider string: The name of the provider that served this block.
+//	    Strings in Go are immutable and cheap to copy (they're internally a
+//	    pointer + length, 16 bytes total), so passing by value is fine.
 //
-// - latency time.Duration: How long the RPC call took. time.Duration is an
-//   int64 under the hood (8 bytes), so passing by value is efficient.
+//	  - latency time.Duration: How long the RPC call took. time.Duration is an
+//	    int64 under the hood (8 bytes), so passing by value is efficient.
 //
 // OUTPUT FORMAT
 // =============

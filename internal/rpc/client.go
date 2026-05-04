@@ -81,7 +81,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -281,12 +283,15 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	// json.Marshal converts the Request struct into a []byte of JSON.
 	// The _ discards the error because marshaling a known-good struct
 	// with simple types (string, int, []interface{}) cannot fail in practice.
-	body, _ := json.Marshal(Request{
+	body, err := json.Marshal(Request{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
 		ID:      1,
 	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal rpc request: %w", err)
+	}
 
 	// START the latency timer.
 	// time.Now() captures the current monotonic clock reading.
@@ -305,7 +310,10 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	// The _ discards the error because NewRequestWithContext only fails if
 	// the method is invalid or the URL can't be parsed — both are programmer
 	// errors, not runtime errors, and our inputs are validated at config time.
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create http request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send the HTTP request and wait for the response.
@@ -327,6 +335,18 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	// connections. The `defer` keyword schedules the Close() call to run when
 	// the enclosing function exits, regardless of which return path is taken.
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		snippet, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		bodyStr := strings.TrimSpace(string(snippet))
+		if readErr != nil {
+			return nil, 0, fmt.Errorf("rpc http status %d: read body: %w", resp.StatusCode, readErr)
+		}
+		if bodyStr == "" {
+			return nil, 0, fmt.Errorf("rpc http status %d: empty body", resp.StatusCode)
+		}
+		return nil, 0, fmt.Errorf("rpc http status %d: %s", resp.StatusCode, bodyStr)
+	}
 
 	// Deserialize the JSON response body into our Response struct.
 	//
@@ -356,7 +376,9 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 	// This is one of the most fundamental patterns in Go: passing a pointer
 	// to a function that needs to modify the caller's data.
 	var rpcResp Response
-	json.NewDecoder(resp.Body).Decode(&rpcResp)
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return nil, 0, fmt.Errorf("decode rpc response: %w", err)
+	}
 
 	// Check for RPC-level errors.
 	// Even if the HTTP request succeeded (200 OK), the Ethereum node might
@@ -423,9 +445,14 @@ func (c *Client) BlockNumber(ctx context.Context) (uint64, time.Duration, error)
 	}
 
 	var hexStr string
-	json.Unmarshal(resp.Result, &hexStr)
+	if err := json.Unmarshal(resp.Result, &hexStr); err != nil {
+		return 0, latency, fmt.Errorf("unmarshal blockNumber result: %w", err)
+	}
 
-	num, _ := ParseHexUint64(hexStr)
+	num, err := ParseHexUint64(hexStr)
+	if err != nil {
+		return 0, latency, fmt.Errorf("parse blockNumber hex %q: %w", hexStr, err)
+	}
 	return num, latency, nil
 }
 
@@ -475,6 +502,8 @@ func (c *Client) GetBlock(ctx context.Context, blockNum string) (*Block, time.Du
 	// Deserialize the raw JSON result into a Block struct.
 	// &block passes the address so Unmarshal can write into our variable.
 	var block Block
-	json.Unmarshal(resp.Result, &block)
+	if err := json.Unmarshal(resp.Result, &block); err != nil {
+		return nil, latency, fmt.Errorf("unmarshal getBlock result: %w", err)
+	}
 	return &block, latency, nil
 }

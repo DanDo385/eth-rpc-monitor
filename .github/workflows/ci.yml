@@ -1,0 +1,27 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: tests (all packages)
+        run: go test ./... -race -count=1
+      - name: coverage on internal packages
+        run: go test ./internal/... -race -count=1 -coverprofile=coverage.out
+      - name: enforce minimum coverage (internal)
+        run: |
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')"
+          echo "Internal packages coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { if (t+0 < 40) { exit 1 } }'

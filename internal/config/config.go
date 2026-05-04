@@ -87,12 +87,12 @@ import (
 //
 // In YAML, this maps to:
 //
-//   defaults:
-//     timeout: 10s
-//     ...
-//   providers:
-//     - name: alchemy
-//       ...
+//	defaults:
+//	  timeout: 10s
+//	  ...
+//	providers:
+//	  - name: alchemy
+//	    ...
 //
 // STRUCT TAG: `yaml:"providers"`
 // ==============================
@@ -109,12 +109,12 @@ import (
 //
 // Under the hood, a slice is a small struct (24 bytes on 64-bit systems):
 //
-//   ┌──────────────┐
-//   │ Slice header  │
-//   │  ptr: ────────┼──▶ [Provider0, Provider1, Provider2, Provider3]
-//   │  len: 4       │     (underlying array on the heap)
-//   │  cap: 4       │
-//   └──────────────┘
+//	┌──────────────┐
+//	│ Slice header  │
+//	│  ptr: ────────┼──▶ [Provider0, Provider1, Provider2, Provider3]
+//	│  len: 4       │     (underlying array on the heap)
+//	│  cap: 4       │
+//	└──────────────┘
 //
 // The YAML parser creates this slice dynamically as it reads each `- name: ...`
 // entry in the YAML list.
@@ -149,9 +149,9 @@ type Config struct {
 // only — it appears in test output but does NOT change any behavior.
 // It exists for human operators to understand their provider landscape.
 type Provider struct {
-	Name    string        `yaml:"name"`             // Identifier (e.g., "alchemy", "infura")
-	URL     string        `yaml:"url"`              // Full RPC endpoint URL (env vars expanded)
-	Type    string        `yaml:"type"`             // Informational: "public", "self_hosted", "enterprise"
+	Name    string        `yaml:"name"`              // Identifier (e.g., "alchemy", "infura")
+	URL     string        `yaml:"url"`               // Full RPC endpoint URL (env vars expanded)
+	Type    string        `yaml:"type"`              // Informational: "public", "self_hosted", "enterprise"
 	Timeout time.Duration `yaml:"timeout,omitempty"` // Per-provider timeout override; 0 = use default
 }
 
@@ -175,10 +175,10 @@ type Defaults struct {
 // Load reads a YAML configuration file and returns a fully-populated Config.
 //
 // This function performs three operations in sequence:
-//   1. READ:   Load the raw file bytes from disk
-//   2. EXPAND: Replace ${VAR} patterns with environment variable values
-//   3. PARSE:  Deserialize the YAML text into Go structs
-//   4. DEFAULT: Fill in missing per-provider timeouts from the defaults
+//  1. READ:   Load the raw file bytes from disk
+//  2. EXPAND: Replace ${VAR} patterns with environment variable values
+//  3. PARSE:  Deserialize the YAML text into Go structs
+//  4. DEFAULT: Fill in missing per-provider timeouts from the defaults
 //
 // RETURN TYPE: (*Config, error)
 // =============================
@@ -189,78 +189,83 @@ type Defaults struct {
 //   - On failure: returns nil pointer, non-nil error
 //
 // Why a pointer? Two reasons:
-//   1. Config contains a slice (Providers), which the caller will iterate.
-//      Returning by value would copy the slice header (cheap) but is
-//      unconventional for "loaded data" that lives for the program's lifetime.
-//   2. Returning nil on error is cleaner than returning an empty Config{}.
-//      Callers can check: if cfg == nil { handle error }.
+//  1. Config contains a slice (Providers), which the caller will iterate.
+//     Returning by value would copy the slice header (cheap) but is
+//     unconventional for "loaded data" that lives for the program's lifetime.
+//  2. Returning nil on error is cleaner than returning an empty Config{}.
+//     Callers can check: if cfg == nil { handle error }.
 //
 // DETAILED WALKTHROUGH OF EACH STEP
 // ==================================
 //
 // Step 1 — os.ReadFile(path):
-//   Reads the entire file into a []byte. If the file doesn't exist or
-//   can't be read, returns an error immediately. The file path comes
-//   from the --config flag (default: "config/providers.yaml").
+//
+//	Reads the entire file into a []byte. If the file doesn't exist or
+//	can't be read, returns an error immediately. The file path comes
+//	from the --config flag (default: "config/providers.yaml").
 //
 // Step 2 — os.ExpandEnv(string(data)):
-//   Scans the file content for ${VAR} or $VAR patterns and replaces them
-//   with the corresponding environment variable values. For example:
 //
-//     Before: url: https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}
-//     After:  url: https://eth-mainnet.g.alchemy.com/v2/abc123def456
+//	Scans the file content for ${VAR} or $VAR patterns and replaces them
+//	with the corresponding environment variable values. For example:
 //
-//   If the environment variable is not set, the pattern is replaced with
-//   an empty string. This is a security-conscious design — API keys live
-//   in the environment (or .env file), not in the YAML file.
+//	  Before: url: https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}
+//	  After:  url: https://eth-mainnet.g.alchemy.com/v2/abc123def456
+//
+//	If the environment variable is not set, the pattern is replaced with
+//	an empty string. This is a security-conscious design — API keys live
+//	in the environment (or .env file), not in the YAML file.
 //
 // Step 3 — yaml.Unmarshal(..., &cfg):
-//   IMPORTANT: The &cfg passes the ADDRESS of cfg to the YAML unmarshaler.
 //
-//   &cfg — the `&` (address-of) operator:
-//     - `cfg` is a local variable of type Config (a value on the stack)
-//     - `&cfg` is the memory address of that variable
-//     - Unmarshal needs the address so it can WRITE INTO cfg's fields
-//     - Without &, Unmarshal would receive a COPY and our cfg stays empty
+//	IMPORTANT: The &cfg passes the ADDRESS of cfg to the YAML unmarshaler.
 //
-//   In memory:
+//	&cfg — the `&` (address-of) operator:
+//	  - `cfg` is a local variable of type Config (a value on the stack)
+//	  - `&cfg` is the memory address of that variable
+//	  - Unmarshal needs the address so it can WRITE INTO cfg's fields
+//	  - Without &, Unmarshal would receive a COPY and our cfg stays empty
 //
-//     Stack                           After Unmarshal fills it in:
-//     ┌───────────────┐               ┌──────────────────────────┐
-//     │ cfg (Config)  │               │ cfg (Config)             │
-//     │  Providers: []│               │  Providers: [{alchemy},  │
-//     │  Defaults: {} │               │              {infura},...│]
-//     └───────────────┘               │  Defaults: {10s, 30, 30s}│
-//          ▲                          └──────────────────────────┘
-//          │                               ▲
-//     &cfg (passed to Unmarshal)       &cfg (same address)
+//	In memory:
+//
+//	  Stack                           After Unmarshal fills it in:
+//	  ┌───────────────┐               ┌──────────────────────────┐
+//	  │ cfg (Config)  │               │ cfg (Config)             │
+//	  │  Providers: []│               │  Providers: [{alchemy},  │
+//	  │  Defaults: {} │               │              {infura},...│]
+//	  └───────────────┘               │  Defaults: {10s, 30, 30s}│
+//	       ▲                          └──────────────────────────┘
+//	       │                               ▲
+//	  &cfg (passed to Unmarshal)       &cfg (same address)
 //
 // Step 4 — Default timeout inheritance:
-//   After parsing, iterate through providers. Any provider with Timeout == 0
-//   (meaning "not set in YAML") gets the default timeout.
 //
-//   NOTE: `for i := range cfg.Providers` uses an INDEX loop, not a
-//   value-copy loop. This is critical:
+//	After parsing, iterate through providers. Any provider with Timeout == 0
+//	(meaning "not set in YAML") gets the default timeout.
 //
-//     for i := range cfg.Providers {
-//         cfg.Providers[i].Timeout = ...  // ← Modifies the ACTUAL slice element
-//     }
+//	NOTE: `for i := range cfg.Providers` uses an INDEX loop, not a
+//	value-copy loop. This is critical:
 //
-//   vs. the WRONG way:
+//	  for i := range cfg.Providers {
+//	      cfg.Providers[i].Timeout = ...  // ← Modifies the ACTUAL slice element
+//	  }
 //
-//     for _, p := range cfg.Providers {
-//         p.Timeout = ...  // ← Modifies a COPY — original unchanged!
-//     }
+//	vs. the WRONG way:
 //
-//   In the value-copy form, `p` is a new variable that receives a copy of
-//   each Provider. Modifying `p` doesn't affect the original in the slice.
-//   Using the index form (cfg.Providers[i]) accesses the actual element
-//   in the slice's underlying array.
+//	  for _, p := range cfg.Providers {
+//	      p.Timeout = ...  // ← Modifies a COPY — original unchanged!
+//	  }
+//
+//	In the value-copy form, `p` is a new variable that receives a copy of
+//	each Provider. Modifying `p` doesn't affect the original in the slice.
+//	Using the index form (cfg.Providers[i]) accesses the actual element
+//	in the slice's underlying array.
 //
 // Step 5 — return &cfg, nil:
-//   The `&` takes the address of the local cfg variable. Go's escape analysis
-//   detects that this address is being returned, so cfg is allocated on the
-//   heap (not the stack) to ensure it outlives the function call.
+//
+//	The `&` takes the address of the local cfg variable. Go's escape analysis
+//	detects that this address is being returned, so cfg is allocated on the
+//	heap (not the stack) to ensure it outlives the function call.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -295,8 +300,8 @@ func Load(path string) (*Config, error) {
 //
 // Example .env file:
 //
-//   ALCHEMY_API_KEY=abc123def456
-//   INFURA_API_KEY=xyz789
+//	ALCHEMY_API_KEY=abc123def456
+//	INFURA_API_KEY=xyz789
 //
 // After LoadEnv runs, os.Getenv("ALCHEMY_API_KEY") returns "abc123def456",
 // and the Load() function's os.ExpandEnv() call will substitute it into URLs.
@@ -305,7 +310,7 @@ func Load(path string) (*Config, error) {
 // ========================================
 // Notice that os.ReadFile errors are silently ignored (the _ discard):
 //
-//   data, _ := os.ReadFile(".env")
+//	data, _ := os.ReadFile(".env")
 //
 // This is intentional — the .env file is OPTIONAL. In production, environment
 // variables come from the deployment environment (Docker, Kubernetes, etc.),
@@ -318,8 +323,8 @@ func Load(path string) (*Config, error) {
 // The `2` means "produce at most 2 parts." This correctly handles values
 // that contain "=" characters:
 //
-//   Input:  "API_KEY=abc=123=xyz"
-//   Parts:  ["API_KEY", "abc=123=xyz"]  ← value includes the extra "="
+//	Input:  "API_KEY=abc=123=xyz"
+//	Parts:  ["API_KEY", "abc=123=xyz"]  ← value includes the extra "="
 //
 // If SplitN used a limit greater than 2, the value would be incorrectly
 // split into multiple parts.

@@ -1,6 +1,5 @@
 defaults:
   timeout: 10s
-  max_retries: 3
   health_samples: 30
   watch_interval: 30s
 

@@ -36,7 +36,7 @@
 //           │           └─ Sleep 200ms between samples
 //           │
 //           └─ Output:
-//               ├─ --json? → Build TestReport → writeJSON()
+//               ├─ --json? → Build TestReport → reportjson.Write()
 //               └─ Terminal? → format.FormatTest()
 //
 // CS CONCEPTS IN THIS FILE
@@ -74,7 +74,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -85,37 +84,22 @@ import (
 
 	"github.com/dando385/eth-rpc-monitor/internal/config"
 	"github.com/dando385/eth-rpc-monitor/internal/format"
+	"github.com/dando385/eth-rpc-monitor/internal/reportjson"
 	"github.com/dando385/eth-rpc-monitor/internal/rpc"
 )
 
 // =============================================================================
-// SECTION 1: JSON Report Utilities
-// =============================================================================
-
-// writeJSON writes any JSON-serializable data to a timestamped file.
-// See cmd/block/main.go for detailed documentation — same function, same pattern.
-func writeJSON(data interface{}, prefix string) (string, error) {
-	os.MkdirAll("reports", 0755)
-	filename := fmt.Sprintf("reports/%s-%s.json", prefix, time.Now().Format("20060102-150405"))
-	file, _ := os.Create(filename)
-	defer file.Close()
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	enc.Encode(data)
-	return filename, nil
-}
-
-// =============================================================================
-// SECTION 2: JSON Report Types
+// SECTION 1: JSON Report Types
 // =============================================================================
 
 // TestReport is the top-level JSON structure for health check reports.
 //
 // This struct wraps the test metadata (when and how many samples) with the
-// per-provider results. It's serialized directly to JSON by writeJSON.
+// per-provider results. It's serialized directly to JSON by reportjson.Write.
 //
 // time.Time is serialized as an ISO 8601 string by Go's JSON encoder:
-//   "timestamp": "2024-01-15T14:32:18.123456789Z"
+//
+//	"timestamp": "2024-01-15T14:32:18.123456789Z"
 type TestReport struct {
 	Timestamp time.Time         `json:"timestamp"` // When the test was run
 	Samples   int               `json:"samples"`   // Number of samples per provider
@@ -125,9 +109,9 @@ type TestReport struct {
 // TestReportEntry holds one provider's test results for JSON export.
 //
 // This is separate from format.TestResult because:
-//   1. JSON reports need latencies as int64 milliseconds (not time.Duration)
-//   2. JSON reports include pre-computed percentiles (not raw latency slices)
-//   3. The JSON schema is a stable external API; internal types can change freely
+//  1. JSON reports need latencies as int64 milliseconds (not time.Duration)
+//  2. JSON reports include pre-computed percentiles (not raw latency slices)
+//  3. The JSON schema is a stable external API; internal types can change freely
 //
 // FIELD: LatenciesMS []int64
 // ==========================
@@ -149,7 +133,7 @@ type TestReportEntry struct {
 }
 
 // =============================================================================
-// SECTION 3: Per-Provider Testing — The Sample Loop
+// SECTION 2: Per-Provider Testing — The Sample Loop
 // =============================================================================
 
 // testProvider runs N sample RPC calls against a single provider and collects
@@ -160,15 +144,16 @@ type TestReportEntry struct {
 //
 // PARAMETERS
 // ==========
-// - client *rpc.Client: POINTER to the RPC client for this provider.
-//   The `*` means we receive the address — the Client was heap-allocated
-//   by rpc.NewClient() in the calling goroutine. We call methods on this
-//   client (BlockNumber), which are pointer-receiver methods. The pointer
-//   is shared between our call and the HTTP connection pool inside the client.
 //
-// - p config.Provider: The provider configuration, passed BY VALUE (copy).
-//   Provider is a small struct (~80 bytes), so copying is efficient.
-//   We only read p.Name and p.Type, so a copy is fine.
+//   - client *rpc.Client: POINTER to the RPC client for this provider.
+//     The `*` means we receive the address — the Client was heap-allocated
+//     by rpc.NewClient() in the calling goroutine. We call methods on this
+//     client (BlockNumber), which are pointer-receiver methods. The pointer
+//     is shared between our call and the HTTP connection pool inside the client.
+//
+//   - p config.Provider: The provider configuration, passed BY VALUE (copy).
+//     Provider is a small struct (~80 bytes), so copying is efficient.
+//     We only read p.Name and p.Type, so a copy is fine.
 //
 // - samples int: Number of test samples to collect.
 //
@@ -183,10 +168,10 @@ type TestReportEntry struct {
 //
 // MEASUREMENT METHODOLOGY
 // ========================
-//   1. WARM-UP: One discarded BlockNumber call to establish the TCP connection
-//   2. SAMPLE LOOP: N measured BlockNumber calls with 200ms delays
-//   3. TRACING: Each sample is logged to stderr for real-time visibility
-//   4. PERCENTILE COMPUTATION: After all samples, compute P50/P95/P99/Max
+//  1. WARM-UP: One discarded BlockNumber call to establish the TCP connection
+//  2. SAMPLE LOOP: N measured BlockNumber calls with 200ms delays
+//  3. TRACING: Each sample is logged to stderr for real-time visibility
+//  4. PERCENTILE COMPUTATION: After all samples, compute P50/P95/P99/Max
 //
 // The stderr tracing is valuable during long test runs — you can see progress
 // in real time, and the interleaved output from concurrent goroutines shows
@@ -262,7 +247,7 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 }
 
 // =============================================================================
-// SECTION 4: Test Orchestration — Running All Providers Concurrently
+// SECTION 3: Test Orchestration — Running All Providers Concurrently
 // =============================================================================
 
 // runTest orchestrates the health check across all configured providers.
@@ -280,12 +265,12 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 //
 // Timeline with 4 providers:
 //
-//   Time 0s    1s    2s    3s    4s    5s    6s
-//   alchemy:   [############################]  ← 30 samples
-//   infura:    [############################]  ← 30 samples (parallel)
-//   llamanodes:[############################]  ← 30 samples (parallel)
-//   publicnode:[############################]  ← 30 samples (parallel)
-//   g.Wait() ─────────────────────────────────▶ all done
+//	Time 0s    1s    2s    3s    4s    5s    6s
+//	alchemy:   [############################]  ← 30 samples
+//	infura:    [############################]  ← 30 samples (parallel)
+//	llamanodes:[############################]  ← 30 samples (parallel)
+//	publicnode:[############################]  ← 30 samples (parallel)
+//	g.Wait() ─────────────────────────────────▶ all done
 //
 // PARAMETER: cfg *config.Config
 // =============================
@@ -335,11 +320,9 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 		})
 	}
 
-	// Wait for ALL goroutines to complete.
-	// g.Wait() blocks the calling goroutine until every g.Go() function returns.
-	g.Wait()
-
-	g.Wait()
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("running provider tests: %w", err)
+	}
 
 	// --- Output ---
 	if jsonOut {
@@ -378,7 +361,7 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 			}
 		}
 
-		filepath, err := writeJSON(reportData, "health")
+		filepath, err := reportjson.Write(reportData, "health")
 		if err != nil {
 			return fmt.Errorf("failed to write JSON report: %w", err)
 		}
@@ -392,7 +375,7 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 }
 
 // =============================================================================
-// SECTION 5: Entry Point
+// SECTION 4: Entry Point
 // =============================================================================
 //
 // main() follows the same pattern as cmd/block/main.go:

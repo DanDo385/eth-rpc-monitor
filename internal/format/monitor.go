@@ -122,35 +122,36 @@ type WatchResult struct {
 // ==========
 // - w io.Writer: Output destination (typically os.Stdout for the terminal)
 //
-// - results []WatchResult: Current polling results from all providers.
-//   This is a fresh slice created by fetchAllProviders() each cycle.
+//   - results []WatchResult: Current polling results from all providers.
+//     This is a fresh slice created by fetchAllProviders() each cycle.
 //
 // - interval time.Duration: The polling interval, displayed for user context.
 //
-// - clearScreen bool: Whether to clear the terminal before rendering.
-//   False on first call (don't erase the user's previous terminal content).
-//   True on subsequent calls (replace the previous dashboard frame).
+//   - clearScreen bool: Whether to clear the terminal before rendering.
+//     False on first call (don't erase the user's previous terminal content).
+//     True on subsequent calls (replace the previous dashboard frame).
 //
 // LAG CALCULATION
 // ===============
 // "Lag" measures how many blocks behind the network leader each provider is:
 //
-//   lag = (highest block seen across all providers) - (this provider's block)
+//	lag = (highest block seen across all providers) - (this provider's block)
 //
 // This is a RELATIVE metric, not absolute. We don't know the "true" network
 // tip — we only know what our configured providers report. The provider
 // with the highest block becomes our reference point (lag = 0).
 //
 // Example:
-//   alchemy:     block 21234567 → lag = 0 (highest)
-//   infura:      block 21234567 → lag = 0 (tied)
-//   llamanodes:  block 21234566 → lag = 1 (one block behind)
-//   publicnode:  block 21234565 → lag = 2 (two blocks behind)
+//
+//	alchemy:     block 21234567 → lag = 0 (highest)
+//	infura:      block 21234567 → lag = 0 (tied)
+//	llamanodes:  block 21234566 → lag = 1 (one block behind)
+//	publicnode:  block 21234565 → lag = 2 (two blocks behind)
 //
 // Lag is inherently approximate because:
-//   1. Each provider is queried at slightly different times
-//   2. Blocks propagate across the network over ~1-2 seconds
-//   3. Our "highest" might not be the true network tip
+//  1. Each provider is queried at slightly different times
+//  2. Blocks propagate across the network over ~1-2 seconds
+//  3. Our "highest" might not be the true network tip
 //
 // Despite these limitations, persistent lag (>2 blocks over multiple cycles)
 // reliably indicates a provider is struggling to stay synchronized.

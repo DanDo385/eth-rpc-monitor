@@ -79,6 +79,7 @@ package format
 import (
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -102,16 +103,16 @@ import (
 //
 // In memory:
 //
-//   TestResult (on stack or heap)
-//   ┌────────────────────────────────┐
-//   │ Name: "alchemy"                │
-//   │ Type: "public"                 │
-//   │ Success: 28                    │
-//   │ Total: 30                      │
-//   │ Latencies: ────────────────────┼──▶ [23ms, 25ms, 21ms, ..., 45ms]
-//   │   (slice header: ptr,len,cap)  │     (28 elements on the heap)
-//   │ BlockHeight: 21234567          │
-//   └────────────────────────────────┘
+//	TestResult (on stack or heap)
+//	┌────────────────────────────────┐
+//	│ Name: "alchemy"                │
+//	│ Type: "public"                 │
+//	│ Success: 28                    │
+//	│ Total: 30                      │
+//	│ Latencies: ────────────────────┼──▶ [23ms, 25ms, 21ms, ..., 45ms]
+//	│   (slice header: ptr,len,cap)  │     (28 elements on the heap)
+//	│ BlockHeight: 21234567          │
+//	└────────────────────────────────┘
 type TestResult struct {
 	Name        string          // Provider name (e.g., "alchemy")
 	Type        string          // Provider type (e.g., "public") — informational
@@ -126,19 +127,20 @@ type TestResult struct {
 // These four values together paint a complete picture of a provider's
 // performance distribution:
 //
-//   P50 (median): The "typical" request. Half are faster, half are slower.
-//   P95:          The "mostly-worst" case. Only 5% of requests are slower.
-//   P99:          The "almost-worst" case. Only 1% of requests are slower.
-//   Max:          The absolute worst observed. The true tail.
+//	P50 (median): The "typical" request. Half are faster, half are slower.
+//	P95:          The "mostly-worst" case. Only 5% of requests are slower.
+//	P99:          The "almost-worst" case. Only 1% of requests are slower.
+//	Max:          The absolute worst observed. The true tail.
 //
 // Example interpretation:
-//   {P50: 23ms, P95: 45ms, P99: 52ms, Max: 78ms}
-//   → "Typical request: 23ms. Worst 1%: ~52ms. Absolute worst: 78ms."
-//   → Tight distribution, reliable provider.
 //
-//   {P50: 23ms, P95: 200ms, P99: 1500ms, Max: 5000ms}
-//   → "Typical request: 23ms. But 1% take 1.5 seconds!"
-//   → Dangerous for trading — the tail will bite you.
+//	{P50: 23ms, P95: 45ms, P99: 52ms, Max: 78ms}
+//	→ "Typical request: 23ms. Worst 1%: ~52ms. Absolute worst: 78ms."
+//	→ Tight distribution, reliable provider.
+//
+//	{P50: 23ms, P95: 200ms, P99: 1500ms, Max: 5000ms}
+//	→ "Typical request: 23ms. But 1% take 1.5 seconds!"
+//	→ Dangerous for trading — the tail will bite you.
 type TailLatency struct {
 	P50, P95, P99, Max time.Duration
 }
@@ -151,20 +153,20 @@ type TailLatency struct {
 //
 // ALGORITHM: Nearest-Rank Method
 // ==============================
-// This is the simplest and most widely used percentile algorithm. It works by:
-//   1. Sort all values in ascending order
-//   2. For percentile P, find the index: index = len * P / 100
-//   3. The value at that index IS the percentile
+// Index for percentile p in (0,1] on sorted ascending data of length n:
 //
-// Step-by-step example with 10 latency samples (already sorted):
+//	index = ceil(n*p) - 1, clamped to [0, n-1]
 //
-//   Index:  [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]
-//   Value:  15ms  18ms  20ms  22ms  23ms  25ms  28ms  35ms  42ms  78ms
+// Matches AGENTS.md: int(math.Ceil(float64(n)*p)) - 1 with bounds clamping.
 //
-//   P50: index = 10 * 50 / 100 = 5  → sorted[5] = 25ms
-//   P95: index = 10 * 95 / 100 = 9  → sorted[9] = 78ms
-//   P99: index = 10 * 99 / 100 = 9  → sorted[min(9, 9)] = 78ms
-//   Max: sorted[9] = 78ms
+// Example with 10 samples (sorted):
+//
+//	Index:  [0]   [1]   [2]   [3]   [4]   [5]   [6]   [7]   [8]   [9]
+//	Value:  15ms  18ms  20ms  22ms  23ms  25ms  28ms  35ms  42ms  78ms
+//
+//	P50: ceil(5)-1 = 4 → sorted[4] = 23ms
+//	P95: ceil(9.5)-1 = 9 → sorted[9] = 78ms
+//	Max: sorted[9] = 78ms
 //
 // Note: With only 10 samples, P95 = P99 = Max. This is expected — you need
 // at least 100 samples for P99 to differ from Max, and at least 20 samples
@@ -188,13 +190,13 @@ type TailLatency struct {
 //
 // In memory:
 //
-//   latencies (original)                sorted (our copy)
-//   ┌─────────────────────┐            ┌─────────────────────┐
-//   │ ptr ──▶ [23, 45, 21]│            │ ptr ──▶ [21, 23, 45]│ ← sorted
-//   │ len: 3              │            │ len: 3              │
-//   │ cap: 3              │            │ cap: 3              │
-//   └─────────────────────┘            └─────────────────────┘
-//   (different underlying arrays — independent)
+//	latencies (original)                sorted (our copy)
+//	┌─────────────────────┐            ┌─────────────────────┐
+//	│ ptr ──▶ [23, 45, 21]│            │ ptr ──▶ [21, 23, 45]│ ← sorted
+//	│ len: 3              │            │ len: 3              │
+//	│ cap: 3              │            │ cap: 3              │
+//	└─────────────────────┘            └─────────────────────┘
+//	(different underlying arrays — independent)
 //
 // EDGE CASE: Empty latencies slice
 // =================================
@@ -214,19 +216,29 @@ func CalculateTailLatency(latencies []time.Duration) TailLatency {
 	// when element i should come before element j.
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
-	// Calculate percentile indices using integer arithmetic.
-	// Integer division truncates (floors), which is the nearest-rank method.
 	n := len(sorted)
 	return TailLatency{
-		P50: sorted[n*50/100],
-		P95: sorted[n*95/100],
-		// P99 uses min() to prevent index overflow for small sample sizes.
-		// Without min(), n*99/100 could equal n for certain sizes, causing
-		// an out-of-bounds access. Example: n=1 → 1*99/100 = 0, which is
-		// fine. But the min() is a safety guard for edge cases.
-		P99: sorted[min(n*99/100, n-1)],
+		P50: sorted[percentileIndex(n, 0.50)],
+		P95: sorted[percentileIndex(n, 0.95)],
+		P99: sorted[percentileIndex(n, 0.99)],
 		Max: sorted[n-1],
 	}
+}
+
+// percentileIndex returns the nearest-rank index for proportion p in (0,1],
+// clamped to [0, n-1]. For n <= 0 returns 0.
+func percentileIndex(n int, p float64) int {
+	if n <= 0 {
+		return 0
+	}
+	idx := int(math.Ceil(float64(n)*p)) - 1
+	if idx < 0 {
+		return 0
+	}
+	if idx >= n {
+		return n - 1
+	}
+	return idx
 }
 
 // =============================================================================
