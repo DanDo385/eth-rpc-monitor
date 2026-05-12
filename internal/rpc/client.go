@@ -499,11 +499,19 @@ func (c *Client) GetBlock(ctx context.Context, blockNum string) (*Block, time.Du
 		return nil, latency, err
 	}
 
+	raw := bytes.TrimSpace(resp.Result)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, latency, fmt.Errorf("eth_getBlockByNumber returned null or empty result")
+	}
+
 	// Deserialize the raw JSON result into a Block struct.
 	// &block passes the address so Unmarshal can write into our variable.
 	var block Block
-	if err := json.Unmarshal(resp.Result, &block); err != nil {
+	if err := json.Unmarshal(raw, &block); err != nil {
 		return nil, latency, fmt.Errorf("unmarshal getBlock result: %w", err)
+	}
+	if block.Hash == "" {
+		return nil, latency, fmt.Errorf("eth_getBlockByNumber returned block without hash")
 	}
 	return &block, latency, nil
 }
