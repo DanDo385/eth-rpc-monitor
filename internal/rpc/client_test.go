@@ -50,6 +50,32 @@ func TestClient_Call_httpNonOK(t *testing.T) {
 	}
 }
 
+func TestClient_Call_http503HTML(t *testing.T) {
+	html := `<html><head><title>503 Service Temporarily Unavailable</title></head><body>noise</body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(html))
+	}))
+	defer srv.Close()
+
+	c := NewClient("t", srv.URL, 2*time.Second)
+	_, _, err := c.Call(context.Background(), "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "503") {
+		t.Fatalf("expected status in message: %q", msg)
+	}
+	if !strings.Contains(msg, "503 Service Temporarily Unavailable") {
+		t.Fatalf("expected HTML title in summarized message: %q", msg)
+	}
+	if strings.Contains(msg, "<script>") {
+		t.Fatalf("did not expect raw script in message: %q", msg)
+	}
+}
+
 func TestClient_Call_invalidJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`not json`))

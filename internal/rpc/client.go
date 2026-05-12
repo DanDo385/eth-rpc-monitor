@@ -211,6 +211,63 @@ func NewClient(name, url string, timeout time.Duration) *Client {
 func (c *Client) Name() string { return c.name }
 
 // =============================================================================
+// SECTION 2.5: Non-JSON HTTP error bodies
+// =============================================================================
+
+// extractHTMLTitle returns the first <title>...</title> contents, if present.
+func extractHTMLTitle(html string) (string, bool) {
+	lower := strings.ToLower(html)
+	idx := strings.Index(lower, "<title")
+	if idx < 0 {
+		return "", false
+	}
+	rest := html[idx:]
+	gt := strings.Index(rest, ">")
+	if gt < 0 {
+		return "", false
+	}
+	contentStart := idx + gt + 1
+	closeRel := strings.Index(strings.ToLower(html[contentStart:]), "</title>")
+	if closeRel < 0 {
+		return "", false
+	}
+	raw := html[contentStart : contentStart+closeRel]
+	title := strings.TrimSpace(strings.Join(strings.Fields(raw), " "))
+	return title, title != ""
+}
+
+func truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return "..."
+	}
+	return s[:max-3] + "..."
+}
+
+// summarizeNonOKHTTPBody turns CDN/HTML error pages into a single short line
+// so snapshot/test stderr stays readable (full HTML is still a 4KiB cap upstream).
+func summarizeNonOKHTTPBody(contentType, body string) string {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	b := strings.TrimSpace(body)
+	bLower := strings.ToLower(b)
+	isHTML := strings.Contains(ct, "text/html") ||
+		strings.HasPrefix(bLower, "<!doctype html") ||
+		strings.Contains(bLower, "<html")
+
+	if isHTML {
+		if title, ok := extractHTMLTitle(b); ok {
+			return fmt.Sprintf("HTML error page: %s", truncateString(title, 200))
+		}
+		return "HTML error page (not JSON-RPC); likely CDN edge or provider outage"
+	}
+
+	oneLine := strings.Join(strings.Fields(b), " ")
+	return truncateString(oneLine, 400)
+}
+
+// =============================================================================
 // SECTION 3: Call — The Core RPC Method
 // =============================================================================
 
@@ -345,7 +402,9 @@ func (c *Client) Call(ctx context.Context, method string, params ...interface{})
 		if bodyStr == "" {
 			return nil, 0, fmt.Errorf("rpc http status %d: empty body", resp.StatusCode)
 		}
-		return nil, 0, fmt.Errorf("rpc http status %d: %s", resp.StatusCode, bodyStr)
+		ct := resp.Header.Get("Content-Type")
+		summary := summarizeNonOKHTTPBody(ct, bodyStr)
+		return nil, 0, fmt.Errorf("rpc http status %d: %s", resp.StatusCode, summary)
 	}
 
 	// Deserialize the JSON response body into our Response struct.
