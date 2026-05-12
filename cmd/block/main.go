@@ -645,14 +645,14 @@ func main() {
 	// *cfgPath dereferences the pointer to get the actual string path.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 
 	// Execute the block inspection.
 	// *provider and *jsonOut dereference the flag pointers to get the actual values.
 	if err := runBlock(cfg, block, *provider, *jsonOut); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 }

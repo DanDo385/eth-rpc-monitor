@@ -254,7 +254,8 @@ func summarizeNonOKHTTPBody(contentType, body string) string {
 	bLower := strings.ToLower(b)
 	isHTML := strings.Contains(ct, "text/html") ||
 		strings.HasPrefix(bLower, "<!doctype html") ||
-		strings.Contains(bLower, "<html")
+		strings.Contains(bLower, "<html") ||
+		(strings.Contains(bLower, "<title") && strings.Contains(bLower, "</title>"))
 
 	if isHTML {
 		if title, ok := extractHTMLTitle(b); ok {

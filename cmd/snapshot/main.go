@@ -134,7 +134,7 @@ func main() {
 	// config.Load returns *config.Config — see config.go for details.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 

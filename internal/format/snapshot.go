@@ -168,13 +168,13 @@ func FormatSnapshot(w io.Writer, results []SnapshotResult) {
 		if r.Error != nil {
 			// Provider failed — show error instead of data.
 			// Dim dashes replace the missing values to maintain column alignment.
-			// The `%v` verb prints the error using its Error() method.
-			fmt.Fprintf(w, "%-14s %s        %s   %s %v\n",
+			// BriefError keeps CDN/HTML pages to one short line for alignment.
+			fmt.Fprintf(w, "%-14s %s        %s   %s %s\n",
 				r.Provider,
 				padRight(Dim("—"), 7),
 				padRight(Dim("—"), 12),
 				Red("ERROR:"),
-				r.Error)
+				BriefError(r.Error))
 		} else {
 			// Provider succeeded — show block data.
 			// The hash is dimmed because it's long and secondary to the

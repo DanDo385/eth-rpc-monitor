@@ -454,13 +454,13 @@ func main() {
 	// *cfgPath dereferences the *string pointer to get the config file path.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 
 	// *interval dereferences the *time.Duration pointer to get the duration value.
 	if err := runMonitor(cfg, *interval); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 }

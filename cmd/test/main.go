@@ -213,7 +213,7 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 			// The format "  alchemy 1/30: 23ms" shows provider, progress, and latency.
 			fmt.Fprintf(os.Stderr, "  %s %d/%d: %dms\n", p.Name, i+1, samples, latency.Milliseconds())
 		} else {
-			fmt.Fprintf(os.Stderr, "  %s %d/%d: ERROR - %v\n", p.Name, i+1, samples, err)
+			fmt.Fprintf(os.Stderr, "  %s %d/%d: ERROR - %s\n", p.Name, i+1, samples, format.BriefError(err))
 		}
 
 		// INTER-SAMPLE DELAY: Sleep 200ms between samples.
@@ -402,14 +402,14 @@ func main() {
 	// actual string value for the config file path.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 
 	// *samples and *jsonOut dereference the flag pointers to get the actual
 	// int and bool values, respectively.
 	if err := runTest(cfg, *samples, *jsonOut); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
 		os.Exit(1)
 	}
 }

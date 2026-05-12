@@ -49,3 +49,18 @@ func TestFormatSnapshot_errorRow(t *testing.T) {
 		t.Fatalf("output: %s", out)
 	}
 }
+
+func TestFormatSnapshot_errorRow_htmlBrief(t *testing.T) {
+	long := `<html><head><title>503 Service Temporarily Unavailable</title></head><body><script>x</script></body></html>`
+	var buf bytes.Buffer
+	FormatSnapshot(&buf, []SnapshotResult{
+		{Provider: "llama", Error: errors.New(long)},
+	})
+	out := buf.String()
+	if strings.Contains(out, "<script") {
+		t.Fatalf("expected brief output: %s", out)
+	}
+	if !strings.Contains(out, "503 Service Temporarily Unavailable") {
+		t.Fatalf("expected title in row: %s", out)
+	}
+}
