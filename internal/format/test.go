@@ -12,7 +12,7 @@
 // DATA FLOW
 // =========
 //
-//   cmd/test/main.go
+//   internal/cli/test.go
 //       │
 //       │  testProvider() runs N samples per provider
 //       │  collects []time.Duration latencies
@@ -91,7 +91,7 @@ import (
 
 // TestResult holds the outcome of testing a single provider.
 //
-// This struct is populated by cmd/test/main.go's testProvider() function,
+// This struct is populated by internal/cli/test.go's testProvider() function,
 // which runs N sample requests and records each latency.
 //
 // SLICE FIELD: Latencies []time.Duration

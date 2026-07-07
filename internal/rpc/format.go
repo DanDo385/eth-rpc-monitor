@@ -27,8 +27,8 @@
 // ==========================
 //   - internal/rpc/types.go    → Parsed() calls ParseHexUint64, ParseHexBigInt
 //   - internal/format/block.go → FormatBlock() calls FormatNumber, FormatTimestamp, FormatGwei
-//   - cmd/block/main.go        → convertBlockToJSON() calls ParseHexUint64, ParseHexBigInt
-//   - cmd/snapshot/main.go     → Calls ParseHexUint64 to convert block heights
+//   - internal/cli/block.go    → ConvertBlockToJSON() calls ParseHexUint64, ParseHexBigInt
+//   - internal/cli/snapshot.go → Calls ParseHexUint64 to convert block heights
 //
 // CS CONCEPTS: NUMBER BASES AND PRECISION
 // ========================================

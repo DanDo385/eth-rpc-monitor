@@ -1,8 +1,4 @@
 # Binaries
-/block
-/compare
-/health
-/monitor
 bin/
 *.exe
 *.exe~

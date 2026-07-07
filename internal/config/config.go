@@ -34,8 +34,8 @@
 //               │  Passed to every command
 //               ▼
 //   ┌──────────────────────────────────────────┐
-//   │   cmd/block, cmd/test, cmd/snapshot,     │
-//   │   cmd/monitor                            │
+//   │   cmd/ethrpc (block, test, snapshot,     │
+//   │   monitor) via internal/cli              │
 //   └──────────────────────────────────────────┘
 //
 // DESIGN DECISIONS

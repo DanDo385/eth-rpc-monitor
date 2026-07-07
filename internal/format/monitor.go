@@ -17,7 +17,7 @@
 // DATA FLOW
 // =========
 //
-//   cmd/monitor/main.go (event loop)
+//   internal/cli/monitor.go (event loop)
 //       │
 //       │  Every N seconds: fetchAllProviders()
 //       │  Returns []WatchResult

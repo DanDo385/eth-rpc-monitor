@@ -8,7 +8,7 @@ Use this file as the **single source of truth** for how to work in this reposito
 
 Portfolio-grade **Go CLI** for Ethereum **JSON-RPC over raw HTTP**: measure **latency**, **tail stats**, and **cross-provider agreement**. It demonstrates operational thinking (RPC quality matters for anything time-sensitive on-chain).
 
-**In scope:** `block`, `test`, `snapshot`, `monitor` binaries; YAML config; colored terminal output; optional JSON reports.
+**In scope:** a single `ethrpc` CLI with `block`, `test`, `snapshot`, `monitor` subcommands (cobra); YAML config; colored terminal output; optional JSON reports.
 
 **Out of scope:** `go-ethereum` / `ethclient`, trading or signing, web UI, durable storage, retries and heavy defensive validation. Keep the design intentionally small and observable.
 
@@ -18,15 +18,20 @@ Portfolio-grade **Go CLI** for Ethereum **JSON-RPC over raw HTTP**: measure **la
 
 ```
 cmd/
-  block/main.go      Inspect one block; auto-select fastest provider on highest head (or --provider)
-  test/main.go       Health / latency samples + percentiles
-  snapshot/main.go   Same block from all providers; compare hash & height
-  monitor/main.go    Live dashboard loop
+  ethrpc/            Thin cobra layer — one file per subcommand wiring flags to cli.Run*
+    main.go          func main → Execute()
+    root.go          rootCmd, persistent --config, PersistentPreRunE → LoadEnv() + Load()
+    block.go         blockCmd  → cli.RunBlock
+    test.go          testCmd   → cli.RunTest
+    snapshot.go      snapshotCmd → cli.RunSnapshot
+    monitor.go       monitorCmd → cli.RunMonitor
 
 internal/
+  cli/               Command workflows (RunBlock/RunTest/RunSnapshot/RunMonitor) + types, importable + tested
   rpc/               HTTP JSON-RPC client, wire types, hex/format helpers
   config/            YAML load, ${VAR} expansion, optional .env via LoadEnv()
   format/            Terminal tables, colors, percentiles, monitor UI
+  reportjson/        Timestamped JSON report writer under reports/
 
 config/
   providers.yaml.example   Template — copy to providers.yaml (gitignored for secrets)
@@ -36,18 +41,22 @@ config/
 
 ## 3. Commands — behavior agents must not get wrong
 
-| Binary | Role | Notable flags |
+All subcommands hang off the single `ethrpc` binary. The cobra layer in `cmd/ethrpc/` only wires flags; the actual workflows are `cli.Run*` in `internal/cli/`.
+
+| Subcommand | Role | Notable flags |
 |--------|------|----------------|
-| `block` | Latest or specific block on one provider | `--config`, `--provider`, `-json` |
-| `test` | Concurrent per-provider samples, warm-up, P50/P95/P99/Max | `--config`, `--samples`, `-json` |
-| `snapshot` | Concurrent `GetBlock` for same tag on everyone | `--config` only |
-| `monitor` | Ticker loop, new RPC client each refresh | `--config`, `--interval` (`0` = use YAML `watch_interval`) |
+| `ethrpc block [block]` | Latest or specific block on one provider | `--config`, `--provider`, `--json`/`-j` |
+| `ethrpc test` | Concurrent per-provider samples, warm-up, P50/P95/P99/Max | `--config`, `--samples`/`-s`, `--json`/`-j` |
+| `ethrpc snapshot [block]` | Concurrent `GetBlock` for same tag on everyone | `--config` only |
+| `ethrpc monitor` | Ticker loop, new RPC client each refresh | `--config`, `--interval`/`-i` (`0` = use YAML `watch_interval`) |
 
-**JSON export:** Implemented for **`block`** and **`test`** only (`-json` → under `reports/`, timestamped). Do **not** assume `snapshot` or `monitor` support `-json` unless the code has been added.
+`--config` is a **persistent** flag on the root command (also `-c`); it triggers `config.LoadEnv()` + `config.Load()` once via `PersistentPreRunE` before any subcommand runs.
 
-**Flags:** Standard library `flag` — both `-flag` and `--flag` work where applicable. Default config path: `config/providers.yaml`.
+**JSON export:** Implemented for **`block`** and **`test`** only (`--json` → under `reports/`, timestamped). Do **not** assume `snapshot` or `monitor` support `--json` unless the code has been added.
 
-**`snapshot` block argument:** Prefer `latest` or hex; decimal tags are not normalized here the way `block` does. Point users at `block` for flexible decimal input.
+**Flags:** cobra (`github.com/spf13/cobra`) — long flags use `--flag`, shorthands use `-x` (aliases noted above). Default config path: `config/providers.yaml`.
+
+**`snapshot` block argument:** Prefer `latest` or hex; decimal tags are not normalized here the way `block` does. Point users at `ethrpc block` for flexible decimal input.
 
 ---
 
@@ -93,15 +102,16 @@ config/
 
 **Terminal:** Colors via `github.com/fatih/color` — green for fast (under 100ms), yellow for 100–300ms, red above 300ms, bold headers, dim secondary.
 
-**JSON mode (`block` / `test`):** Write pretty-printed JSON under `reports/`; **errors and progress to stderr**; do not mix diagnostic noise into report payloads. Filenames use timestamp pattern (e.g. `block-YYYYMMDD-HHMMSS.json`, `test` may use `health-` prefix — follow existing `writeJSON` helpers in each command).
+**JSON mode (`block` / `test`):** Write pretty-printed JSON under `reports/`; **errors and progress to stderr**; do not mix diagnostic noise into report payloads. Filenames use timestamp pattern (e.g. `block-YYYYMMDD-HHMMSS.json`, `test` may use `health-` prefix — follow the `reportjson.Write` helper).
 
 ---
 
 ## 9. Code quality (non-negotiables)
 
 - Package comments on **all** packages; doc comments on **exported** symbols (purpose, params, returns); inline comments where the algorithm is non-obvious.
-- Wrap errors: `fmt.Errorf("context: %w", err)`; `main` prints user-facing messages.
-- **Do not:** `go-ethereum`, web UI, DB persistence, hardcoded provider defaults in Go, comparing hashes at **different** block heights, retry storms, CLI frameworks beyond `flag`, or stdout/stderr mixing in JSON mode.
+- Wrap errors: `fmt.Errorf("context: %w", err)`; the cobra layer lets cobra print user-facing errors (`SilenceUsage: true`) — do not double-print from `RunE`.
+- **CLI framework:** `github.com/spf13/cobra`. Command workflows MUST live in `internal/cli` (importable, testable, and covered by the CI 40% floor on `./internal/...`); `cmd/ethrpc` stays a thin flag-wiring shell. Do not push workflow logic back into `package main`.
+- **Do not:** `go-ethereum`, web UI, DB persistence, hardcoded provider defaults in Go, comparing hashes at **different** block heights, retry storms, or stdout/stderr mixing in JSON mode.
 
 ---
 
@@ -109,13 +119,13 @@ config/
 
 ```bash
 make build
-./bin/block latest
-./bin/test -samples 5
-./bin/snapshot latest
-./bin/monitor -interval 5s   # Ctrl+C to exit
+./bin/ethrpc block latest
+./bin/ethrpc test --samples 5
+./bin/ethrpc snapshot latest
+./bin/ethrpc monitor --interval 5s   # Ctrl+C to exit
 ```
 
-If you touched JSON paths: `./bin/block latest -json` and `./bin/test -json` and confirm files under `reports/`.
+If you touched JSON paths: `./bin/ethrpc block latest --json` and `./bin/ethrpc test --json` and confirm files under `reports/`.
 
 ---
 
@@ -127,7 +137,9 @@ If you touched JSON paths: `./bin/block latest -json` and `./bin/test -json` and
 | Wire / block types | `internal/rpc/types.go` |
 | Hex / units / time | `internal/rpc/format.go` |
 | YAML + env | `internal/config/config.go` |
-| Provider race / warm-up | `cmd/block/main.go`, `cmd/test/main.go`, `cmd/snapshot/main.go` |
-| Monitor loop / tick | `cmd/monitor/main.go` |
+| Command workflows (Run*) | `internal/cli/block.go`, `test.go`, `snapshot.go`, `monitor.go` |
+| Cobra flags / root / config load | `cmd/ethrpc/root.go` + per-subcommand files |
+| Provider race / warm-up | `internal/cli/block.go`, `test.go`, `snapshot.go` |
+| Monitor loop / tick | `internal/cli/monitor.go` |
 
 When in doubt, prefer **small, focused diffs** and behavior that matches this document and **`README.md`**.

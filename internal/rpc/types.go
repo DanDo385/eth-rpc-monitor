@@ -15,11 +15,11 @@
 // DEPENDENCY GRAPH
 // ================
 //
-//   cmd/block ──┐
-//   cmd/test ───┤
-//   cmd/snapshot┤──▶ internal/rpc (this package) ──▶ net/http (stdlib)
-//   cmd/monitor─┘         │
-//                         ▼
+//   cmd/ethrpc ──┐
+//     block ─────┤
+//     test ──────┤──▶ internal/cli ──▶ internal/rpc (this package) ──▶ net/http (stdlib)
+//     snapshot ──┤         │
+//     monitor ───┘         ▼
 //                  internal/format (consumes Block / ParsedBlock)
 //
 // Every command in cmd/ imports this package. The format package also imports

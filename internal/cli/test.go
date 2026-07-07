@@ -1,11 +1,9 @@
 // =============================================================================
-// FILE: cmd/test/main.go
-// ROLE: Health Check Command — Provider Reliability and Tail Latency Testing
+// FILE: internal/cli/test.go
+// ROLE: Health Check Workflow — Provider Reliability and Tail Latency Testing
 // =============================================================================
 //
-// SYSTEM CONTEXT
-// ==============
-// This is the entry point for the `test` command, the most data-intensive
+// This is the workflow logic for the `test` subcommand, the most data-intensive
 // tool in the suite. While `block` fetches one data point and `snapshot`
 // fetches one block from each provider, `test` runs N samples per provider
 // to build a STATISTICAL picture of each provider's performance.
@@ -18,30 +16,25 @@
 // EXECUTION FLOW
 // ==============
 //
-//   1. main()
+//   RunTest(cfg, samples, jsonOut)
 //      │
-//      ├─ config.LoadEnv()          ← Load .env file
-//      ├─ flag.Parse()              ← Parse --config, --samples, --json flags
-//      ├─ config.Load(*cfgPath)     ← Read providers.yaml
-//      └─ runTest(cfg, ...)         ← Execute the health check
-//           │
-//           ├─ For each provider (concurrently via errgroup):
-//           │   └─ testProvider(client, provider, samples)
-//           │       │
-//           │       ├─ Warm-up call (BlockNumber — connection priming)
-//           │       └─ For i = 0..samples:
-//           │           ├─ Call BlockNumber()
-//           │           ├─ Record latency (if success)
-//           │           ├─ Log to stderr (real-time tracing)
-//           │           └─ Sleep 200ms between samples
-//           │
-//           └─ Output:
-//               ├─ --json? → Build TestReport → reportjson.Write()
-//               └─ Terminal? → format.FormatTest()
+//      ├─ For each provider (concurrently via errgroup):
+//      │   └─ testProvider(client, provider, samples)
+//      │       │
+//      │       ├─ Warm-up call (BlockNumber — connection priming)
+//      │       └─ For i = 0..samples:
+//      │           ├─ Call BlockNumber()
+//      │           ├─ Record latency (if success)
+//      │           ├─ Log to stderr (real-time tracing)
+//      │           └─ Sleep 200ms between samples
+//      │
+//      └─ Output:
+//          ├─ --json? → Build TestReport → reportjson.Write()
+//          └─ Terminal? → format.FormatTest()
 //
 // CS CONCEPTS IN THIS FILE
 // =========================
-// 1. SAMPLING: Why N measurements are better than 1, and how to choose N
+// 1. SAMPLING: Why N measurements are better than 1
 // 2. WARM-UP: Eliminating measurement bias from connection setup
 // 3. INTER-SAMPLE DELAY: Why we sleep 200ms between samples
 // 4. CONCURRENT TESTING: Running all providers in parallel
@@ -51,30 +44,21 @@
 // =======================================
 // A single latency measurement is noisy — it might catch a lucky fast path
 // or an unlucky slow path. By taking N samples, we can compute percentiles
-// that reveal the TRUE distribution:
-//
-//   Sample 1:  23ms  ← might just be lucky
-//   Sample 2:  25ms
-//   Sample 3:  142ms ← network hiccup
-//   ...
-//   Sample 30: 21ms
-//
-// With 30 samples, we can reliably estimate P50 (typical) and P95 (worst 5%).
-// The warm-up call (first BlockNumber call whose result is discarded) ensures
-// the TCP connection and TLS handshake are already done before we start
-// measuring, so samples reflect steady-state performance, not one-time setup.
+// that reveal the TRUE distribution. The warm-up call (first BlockNumber
+// call whose result is discarded) ensures the TCP connection and TLS
+// handshake are already done before we start measuring, so samples reflect
+// steady-state performance, not one-time setup.
 //
 // The 200ms inter-sample delay prevents:
-//   1. Rate limiting by the provider (which would artificially inflate latency)
-//   2. Hammering the provider's infrastructure (which could affect other users)
-//   3. Saturating our own network connection
+//  1. Rate limiting by the provider (artificially inflating latency)
+//  2. Hammering the provider's infrastructure
+//  3. Saturating our own network connection
 // =============================================================================
 
-package main
+package cli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"sync"
@@ -116,9 +100,8 @@ type TestReport struct {
 // FIELD: LatenciesMS []int64
 // ==========================
 // The raw latency samples, converted from time.Duration to int64 milliseconds.
-// This array is included in JSON reports so external tools can perform their
-// own statistical analysis (e.g., compute different percentiles, plot histograms,
-// or detect patterns like latency spikes).
+// Included so external tools can perform their own statistical analysis
+// (different percentiles, histograms, spike detection).
 type TestReportEntry struct {
 	Name         string  `json:"name"`           // Provider name
 	Type         string  `json:"type"`           // Provider type (informational)
@@ -137,34 +120,26 @@ type TestReportEntry struct {
 // =============================================================================
 
 // testProvider runs N sample RPC calls against a single provider and collects
-// latency statistics.
-//
-// This function runs WITHIN a goroutine (one per provider). Multiple
+// latency statistics. It runs WITHIN a goroutine (one per provider); multiple
 // testProvider calls execute concurrently, each testing a different provider.
 //
 // PARAMETERS
 // ==========
-//
 //   - client *rpc.Client: POINTER to the RPC client for this provider.
-//     The `*` means we receive the address — the Client was heap-allocated
-//     by rpc.NewClient() in the calling goroutine. We call methods on this
-//     client (BlockNumber), which are pointer-receiver methods. The pointer
-//     is shared between our call and the HTTP connection pool inside the client.
-//
+//     We call pointer-receiver methods on this client; the pointer is shared
+//     with the HTTP connection pool inside the client.
 //   - p config.Provider: The provider configuration, passed BY VALUE (copy).
-//     Provider is a small struct (~80 bytes), so copying is efficient.
-//     We only read p.Name and p.Type, so a copy is fine.
-//
-// - samples int: Number of test samples to collect.
+//     Provider is a small struct, and we only read p.Name and p.Type.
+//   - samples int: Number of test samples to collect.
 //
 // RETURN VALUE: format.TestResult (by value)
 // ===========================================
 // Returns a TestResult struct BY VALUE. The struct contains a []time.Duration
 // slice (Latencies), which internally holds a pointer to the heap-allocated
 // latency array. Returning by value copies the slice header (24 bytes) but
-// NOT the underlying latency data — both the caller and the returned struct
-// share the same heap array. This is safe because testProvider is done with
-// the data when it returns.
+// NOT the underlying latency data — both caller and returned struct share
+// the same heap array. This is safe because testProvider is done with the
+// data when it returns.
 //
 // MEASUREMENT METHODOLOGY
 // ========================
@@ -172,10 +147,6 @@ type TestReportEntry struct {
 //  2. SAMPLE LOOP: N measured BlockNumber calls with 200ms delays
 //  3. TRACING: Each sample is logged to stderr for real-time visibility
 //  4. PERCENTILE COMPUTATION: After all samples, compute P50/P95/P99/Max
-//
-// The stderr tracing is valuable during long test runs — you can see progress
-// in real time, and the interleaved output from concurrent goroutines shows
-// which providers are responding and which are timing out.
 func testProvider(client *rpc.Client, p config.Provider, samples int) format.TestResult {
 	// context.Background() creates an empty context with no timeout.
 	// Individual RPC calls are bounded by the client's HTTP timeout
@@ -184,7 +155,6 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 
 	// var latencies []time.Duration — nil slice (no allocation yet).
 	// append() will allocate the underlying array on first use.
-	// We don't pre-allocate because we don't know how many will succeed.
 	var latencies []time.Duration
 	var lastHeight uint64
 	success := 0
@@ -193,9 +163,8 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 	fmt.Fprintf(os.Stderr, "\n[%s] Testing with %d samples...\n", p.Name, samples)
 
 	// WARM-UP CALL: Prime the HTTP connection.
-	// client.BlockNumber(ctx) makes one RPC call whose result is discarded.
-	// This ensures the TCP connection and TLS handshake are done before
-	// we start measuring, isolating steady-state latency from setup overhead.
+	// The result is discarded — this isolates steady-state latency from
+	// one-time connection setup overhead.
 	client.BlockNumber(ctx)
 
 	// SAMPLE LOOP: Collect N latency measurements.
@@ -204,22 +173,18 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 		if err == nil {
 			success++
 			// append() adds the latency to the slice, growing the underlying
-			// array if needed. Go's append uses an amortized doubling strategy:
-			// when the array is full, it allocates a new one at 2x capacity
-			// and copies existing elements. This gives O(1) amortized appends.
+			// array if needed (amortized doubling → O(1) amortized appends).
 			latencies = append(latencies, latency)
 			lastHeight = height
 			// Log each successful sample to stderr.
-			// The format "  alchemy 1/30: 23ms" shows provider, progress, and latency.
 			fmt.Fprintf(os.Stderr, "  %s %d/%d: %dms\n", p.Name, i+1, samples, latency.Milliseconds())
 		} else {
 			fmt.Fprintf(os.Stderr, "  %s %d/%d: ERROR - %s\n", p.Name, i+1, samples, format.BriefError(err))
 		}
 
-		// INTER-SAMPLE DELAY: Sleep 200ms between samples.
-		// Skip the delay after the last sample (no point waiting).
-		// time.Sleep blocks the current goroutine (not the OS thread),
-		// allowing other goroutines to run during the sleep.
+		// INTER-SAMPLE DELAY: Sleep 200ms between samples (skip after the last).
+		// time.Sleep blocks the current goroutine (not the OS thread), allowing
+		// other goroutines to run during the sleep.
 		if i < samples-1 {
 			time.Sleep(200 * time.Millisecond)
 		}
@@ -250,18 +215,15 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 // SECTION 3: Test Orchestration — Running All Providers Concurrently
 // =============================================================================
 
-// runTest orchestrates the health check across all configured providers.
+// RunTest orchestrates the health check across all configured providers.
 //
 // CONCURRENCY ARCHITECTURE
 // ========================
 // This function spawns one goroutine per provider using errgroup. All providers
-// are tested SIMULTANEOUSLY, which means:
-//
-//   - A 4-provider test with 30 samples takes ~6 seconds (30 * 200ms delay)
-//     regardless of provider count (parallel, not serial)
-//   - stderr output is interleaved (samples from different providers appear
-//     in real time as they arrive)
-//   - The sync.Mutex ensures thread-safe writes to the shared results slice
+// are tested SIMULTANEOUSLY, which means a 4-provider test with 30 samples
+// takes ~6 seconds (30 * 200ms delay) regardless of provider count (parallel,
+// not serial). stderr output is interleaved as samples arrive in real time,
+// and the sync.Mutex ensures thread-safe writes to the shared results slice.
 //
 // Timeline with 4 providers:
 //
@@ -271,14 +233,7 @@ func testProvider(client *rpc.Client, p config.Provider, samples int) format.Tes
 //	llamanodes:[############################]  ← 30 samples (parallel)
 //	publicnode:[############################]  ← 30 samples (parallel)
 //	g.Wait() ─────────────────────────────────▶ all done
-//
-// PARAMETER: cfg *config.Config
-// =============================
-// A POINTER to the Config struct. The `*` means we receive the address —
-// cfg is a pointer that lets us access Providers and Defaults without copying
-// the entire Config (which contains a slice of providers, each with strings
-// for name and URL).
-func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
+func RunTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 	// Determine sample count: flag override > config default.
 	samples := cfg.Defaults.HealthSamples
 	if samplesOverride > 0 {
@@ -287,9 +242,7 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 
 	fmt.Printf("\nTesting %d providers with %d samples each...\n\n", len(cfg.Providers), samples)
 
-	// Pre-allocate one result slot per provider.
-	// make([]format.TestResult, len(cfg.Providers)) creates a slice with
-	// the exact size needed. Each slot is zero-initialized.
+	// Pre-allocate one result slot per provider (zero-initialized).
 	results := make([]format.TestResult, len(cfg.Providers))
 	var mu sync.Mutex
 
@@ -306,13 +259,6 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 			result := testProvider(client, p, samples)
 
 			// Write the result to the shared slice under mutex protection.
-			//
-			// mu.Lock() acquires exclusive access to the results slice.
-			// No other goroutine can read or write results while we hold the lock.
-			// mu.Unlock() releases the lock, allowing other goroutines to proceed.
-			//
-			// results[i] = result copies the TestResult struct (including
-			// the Latencies slice header) into the pre-allocated slot.
 			mu.Lock()
 			results[i] = result
 			mu.Unlock()
@@ -327,7 +273,6 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 	// --- Output ---
 	if jsonOut {
 		// Build the JSON report structure.
-		// time.Now() captures the timestamp of when the test completed.
 		reportData := TestReport{
 			Timestamp: time.Now(),
 			Samples:   samples,
@@ -343,9 +288,8 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 				latenciesMs[j] = lat.Milliseconds()
 			}
 
-			// Re-compute percentiles for the JSON report.
-			// We compute them again (rather than storing from testProvider)
-			// to keep the data flow clear and avoid adding fields to TestResult.
+			// Re-compute percentiles for the JSON report (keeps the data flow
+			// clear and avoids adding fields to TestResult).
 			tail := format.CalculateTailLatency(r.Latencies)
 			reportData.Results[i] = TestReportEntry{
 				Name:         r.Name,
@@ -372,44 +316,4 @@ func runTest(cfg *config.Config, samplesOverride int, jsonOut bool) error {
 	// Terminal display: render the formatted comparison table.
 	format.FormatTest(os.Stdout, results)
 	return nil
-}
-
-// =============================================================================
-// SECTION 4: Entry Point
-// =============================================================================
-//
-// main() follows the same pattern as cmd/block/main.go:
-//   1. Load .env environment variables
-//   2. Parse command-line flags (returns pointers)
-//   3. Load YAML configuration (dereference flag pointer with *)
-//   4. Delegate to runTest() (dereference flag pointers with *)
-//
-// See cmd/block/main.go SECTION 7 for detailed flag/pointer documentation.
-// =============================================================================
-
-func main() {
-	config.LoadEnv()
-
-	var (
-		cfgPath = flag.String("config", "config/providers.yaml", "Config file path")
-		samples = flag.Int("samples", 0, "Number of test samples per provider (0 = use config default)")
-		jsonOut = flag.Bool("json", false, "Output JSON report to reports directory")
-	)
-
-	flag.Parse()
-
-	// *cfgPath dereferences the pointer returned by flag.String to get the
-	// actual string value for the config file path.
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
-		os.Exit(1)
-	}
-
-	// *samples and *jsonOut dereference the flag pointers to get the actual
-	// int and bool values, respectively.
-	if err := runTest(cfg, *samples, *jsonOut); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", format.BriefError(err))
-		os.Exit(1)
-	}
 }

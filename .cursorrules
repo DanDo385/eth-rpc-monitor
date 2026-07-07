@@ -1,5 +1,0 @@
-# Ethereum RPC Monitor
-
-All agent and contributor conventions for this repo live in **`AGENTS.md`** (architecture, commands, config rules, do-nots, and verification).
-
-Human setup and CLI walkthrough: **`README.md`**.

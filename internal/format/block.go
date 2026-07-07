@@ -7,7 +7,7 @@
 // ==============
 // This file contains exactly one function: FormatBlock. It takes raw block data
 // from the RPC layer and renders it as a formatted, color-coded display in the
-// terminal. It's used exclusively by the `block` command (cmd/block/main.go).
+// terminal. It's used exclusively by the `block` subcommand (internal/cli/block.go).
 //
 // DATA FLOW
 // =========

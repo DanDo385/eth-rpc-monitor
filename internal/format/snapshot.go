@@ -16,7 +16,7 @@
 // DATA FLOW
 // =========
 //
-//   cmd/snapshot/main.go
+//   internal/cli/snapshot.go
 //       │
 //       │  Fetches the SAME block from ALL providers concurrently
 //       │  Records: hash, height, latency, or error for each

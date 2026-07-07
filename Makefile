@@ -1,13 +1,10 @@
 .PHONY: build clean install test vet
 
-# Build all binaries into bin/ directory
+# Build the single ethrpc CLI binary into bin/
 build:
 	@mkdir -p bin
-	go build -o bin/block ./cmd/block
-	go build -o bin/test ./cmd/test
-	go build -o bin/snapshot ./cmd/snapshot
-	go build -o bin/monitor ./cmd/monitor
-	@echo "Built all binaries in bin/"
+	go build -o bin/ethrpc ./cmd/ethrpc
+	@echo "Built bin/ethrpc"
 
 # Clean all binaries
 clean:
