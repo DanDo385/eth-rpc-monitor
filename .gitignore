@@ -39,6 +39,10 @@ config/providers.yaml
 reports/
 *.json
 !package.json
+# Portfolio media kit (must be publishable for magro.dev sync)
+!repo-resources/
+!repo-resources/**
+!repo-resources/**/*.json
 
 # Logs
 *.log
