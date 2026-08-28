@@ -40,9 +40,9 @@ reports/
 *.json
 !package.json
 # Portfolio media kit (must be publishable for magro.dev sync)
-!repo-resources/
-!repo-resources/**
-!repo-resources/**/*.json
+!public/
+!public/**
+!public/**/*.json
 
 # Logs
 *.log

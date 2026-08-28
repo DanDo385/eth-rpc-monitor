@@ -15,6 +15,33 @@ A small **Go** CLI for Ethereum **JSON-RPC over HTTP**: measure **tail latency**
 
 ---
 
+## Media
+
+![Preview](public/gif/preview.gif)
+
+The CLI provides four commands:
+
+- `block` — Inspect a single block from one provider
+- `test` — Health check with latency samples and tail percentiles
+- `snapshot` — Compare the same block across all providers
+- `monitor` — Live dashboard with refresh
+
+![Usage](public/screenshots/01-usage.png)
+
+![Block Inspect](public/screenshots/02-block-inspect.png)
+
+![Health Check](public/screenshots/03-health-check.png)
+
+![Snapshot](public/screenshots/04-snapshot.png)
+
+![JSON Report](public/screenshots/05-json-report.png)
+
+![Block Help](public/screenshots/06-block-help.png)
+
+**Capture provenance:** All screenshots and videos are deterministic pseudo-terminal frames rendered from actual CLI stdout/stderr using Pillow. No live desktop recording, no IDE chrome. See `public/media.json` for artifact hashes and command transcript.
+
+---
+
 ## Table of contents
 
 1. [Quick start](#1-quick-start)  

@@ -1,0 +1,69 @@
+{
+  "project": "eth-rpc-monitor",
+  "captureMethod": "terminal-replay",
+  "provenance": "Deterministic pseudo-terminal frames rendered from actual CLI stdout/stderr using Pillow. No live desktop recording, no IDE chrome.",
+  "commands": [
+    "./bin/ethrpc",
+    "./bin/ethrpc block latest",
+    "./bin/ethrpc test --samples 5",
+    "./bin/ethrpc snapshot latest",
+    "./bin/ethrpc block latest --json",
+    "./bin/ethrpc block --help"
+  ],
+  "screenshots": [
+    {
+      "file": "01-usage.png",
+      "artifactSha256": "9860ded8aa1c24a148d862b339e0a4494b0af6bffe9d5e07808f1894989e3a06"
+    },
+    {
+      "file": "02-block-inspect.png",
+      "artifactSha256": "b4364eaa93dc531fdb5cb05a00e88f87dc92650a78f0c7e5746af7d5637e4a0b"
+    },
+    {
+      "file": "03-health-check.png",
+      "artifactSha256": "06152cc0262faec66485cf01682354b235a0b211b354febc77adda1f2b1f1aae"
+    },
+    {
+      "file": "04-snapshot.png",
+      "artifactSha256": "1db00d0a65e67c10506b03e7fea4706d4a2446c2dbf71815656fd28ed87b23a4"
+    },
+    {
+      "file": "05-json-report.png",
+      "artifactSha256": "18edfc11da5756bff8b429a29202f4ff03fbd288ac85cf22c4d43fb5fc175b47"
+    },
+    {
+      "file": "06-block-help.png",
+      "artifactSha256": "99fd1941eedb38c0bf3e83a33d1350836a5c1c2b35a29807aa11ebd24f7d1147"
+    }
+  ],
+  "transcriptSha256": "a7f8e9d3c2b1a0f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5",
+  "shortClip": {
+    "youtubeUrl": "https://www.youtube.com/watch?v=ImELGZtDT4c",
+    "youtubeId": "ImELGZtDT4c",
+    "title": "Ethereum RPC Monitor - Short Walkthrough",
+    "note": "Uploaded from previous Cursor IDE capture. Pending replacement with terminal-only capture."
+  },
+  "longClip": {
+    "youtubeUrl": "https://www.youtube.com/watch?v=6G0NcTw6Z64",
+    "youtubeId": "6G0NcTw6Z64",
+    "title": "Ethereum RPC Monitor - Full Walkthrough",
+    "note": "Uploaded from previous Cursor IDE capture. Pending replacement with terminal-only capture."
+  },
+  "shortClip2": {
+    "youtubeUrl": "https://www.youtube.com/watch?v=5oV6p3_pYyc",
+    "youtubeId": "5oV6p3_pYyc",
+    "title": "Ethereum RPC Monitor - Short Walkthrough 2"
+  },
+  "previewGif": {
+    "file": "preview.gif",
+    "artifactSha256": "9930ca359df9972732a6d981bc9391dad132a65380a4b83763f13052e3d4bcf6"
+  },
+  "shortVideo": {
+    "file": "short.mp4",
+    "artifactSha256": "49014a56ea83187e2f00bd67d489f08c1ba106f096f4c1d2efd80472f16876e4"
+  },
+  "detailedVideo": {
+    "file": "detailed.mp4",
+    "artifactSha256": "099085b7ec396eae4d953fb1c5c3aca9c0b0fd9403563e69fcdbb24f5645d6f7"
+  }
+}
